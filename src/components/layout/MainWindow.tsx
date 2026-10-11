@@ -347,16 +347,20 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
+  const showAgents = useUIStore(state => state.railSection === 'agents')
+
   // Compute window title based on selected project/worktree
   // On mobile, show only the project name to fit the compact title bar.
   const windowTitle = useMemo(() => {
+    // Agents page is not a project page
+    if (showAgents) return 'Agents'
     if (!project || !worktree) return 'Jean'
     if (isMobile) return project.name
     const branchSuffix =
       worktree.branch !== worktree.name ? ` (${worktree.branch})` : ''
 
     return `${project.name} › ${worktree.name}${branchSuffix}`
-  }, [project, worktree, isMobile])
+  }, [project, worktree, isMobile, showAgents])
 
   // Compute polling info - null if no worktree or data not loaded.
   // Must use the worktree's own base_branch (e.g. v4.x), not the project

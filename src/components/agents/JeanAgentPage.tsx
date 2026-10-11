@@ -42,10 +42,12 @@ export function JeanAgentPage() {
       <div className="relative flex min-h-0 flex-1 flex-col">
         {error ? (
           <div
-            className="flex flex-1 items-center justify-center text-sm text-destructive"
+            className="flex flex-1 items-center justify-center px-6 text-center text-sm text-destructive"
             role="alert"
           >
-            Jean is unavailable: {String(error)}
+            {String(error).includes('Unknown command')
+              ? 'Jean needs a newer Jean server. Update the server and reload.'
+              : `Jean is unavailable: ${String(error)}`}
           </div>
         ) : workdir ? (
           <Suspense fallback={LOADING}>
