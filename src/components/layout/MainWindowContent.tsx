@@ -21,7 +21,7 @@ import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { scheduleIdleWork } from '@/lib/idle'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
-import { JeanAgentPage } from '@/components/agents/JeanAgentPage'
+import { AgentPage } from '@/components/agents/AgentPage'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -233,7 +233,7 @@ export const MainWindowContent = memo(function MainWindowContent({
           className="relative flex h-full w-full min-w-0 flex-col bg-background"
           data-testid="mobile-swipe-open-sidebar"
         >
-          {showAgents ? <JeanAgentPage /> : nonChatContent}
+          {showAgents ? <AgentPage /> : nonChatContent}
         </div>
       )}
     </div>

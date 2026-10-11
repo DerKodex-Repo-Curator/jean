@@ -117,6 +117,8 @@ export type RailSection = 'workspace' | 'agents'
 interface UIState {
   leftSidebarVisible: boolean
   railSection: RailSection
+  /** Agent open on the Agents page */
+  selectedAgentId: string
   leftSidebarSize: number // Width in pixels, persisted across sessions
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
@@ -235,6 +237,7 @@ interface UIState {
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
   setRailSection: (section: RailSection) => void
+  setSelectedAgentId: (agentId: string) => void
   setLeftSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
@@ -388,6 +391,7 @@ export const useUIStore = create<UIState>()(
     (set, get) => ({
       leftSidebarVisible: false,
       railSection: 'workspace',
+      selectedAgentId: 'jean',
       leftSidebarSize: 250, // Default width in pixels
       leftSidebarSwipe: {
         isDragging: false,
@@ -518,6 +522,16 @@ export const useUIStore = create<UIState>()(
             state.railSection === section ? state : { railSection: section },
           undefined,
           'setRailSection'
+        ),
+
+      setSelectedAgentId: agentId =>
+        set(
+          state =>
+            state.selectedAgentId === agentId
+              ? state
+              : { selectedAgentId: agentId },
+          undefined,
+          'setSelectedAgentId'
         ),
 
       toggleRightSidebar: () =>

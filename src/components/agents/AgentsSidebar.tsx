@@ -1,0 +1,74 @@
+import { useCallback } from 'react'
+import { X } from '@/components/icons/reicon'
+import { cn } from '@/lib/utils'
+import { useUIStore } from '@/store/ui-store'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
+import { AGENTS, findAgent } from './agents'
+
+/** Agents sidebar panel: lists all agents like the projects list. */
+export function AgentsSidebar() {
+  const isMobile = useIsMobile()
+  const selectedAgentId = useUIStore(
+    state => findAgent(state.selectedAgentId).id
+  )
+
+  const handleSelect = useCallback(
+    (agentId: string) => {
+      const ui = useUIStore.getState()
+      ui.setSelectedAgentId(agentId)
+      if (isMobile) ui.setLeftSidebarVisible(false)
+    },
+    [isMobile]
+  )
+
+  return (
+    <div className="flex h-full">
+      {isMobile && (
+        <SidebarTabRail className="border-r border-border/40">
+          <button
+            type="button"
+            className="flex size-12 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={() => useUIStore.getState().setLeftSidebarVisible(false)}
+            aria-label="Close sidebar"
+          >
+            <X className="size-6" />
+          </button>
+        </SidebarTabRail>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Same 8px offset and 48px height as the rail buttons, so they line up */}
+        <div className="mt-2 flex h-12 shrink-0 items-center px-3">
+          <h2 className="text-sm font-medium text-foreground">Agents</h2>
+        </div>
+        <ul
+          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+          aria-label="Agents"
+        >
+          {AGENTS.map(({ id, name, Icon }) => {
+            const selected = id === selectedAgentId
+            return (
+              <li key={id}>
+                <button
+                  type="button"
+                  aria-current={selected ? 'page' : undefined}
+                  className={cn(
+                    'relative flex w-full items-center gap-1.5 overflow-hidden px-2 py-1.5 text-left transition-colors duration-150',
+                    selected
+                      ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                  )}
+                  onClick={() => handleSelect(id)}
+                  data-testid={`agent-row-${id}`}
+                >
+                  <Icon className="size-4 shrink-0" />
+                  <span className="truncate text-sm">{name}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    </div>
+  )
+}

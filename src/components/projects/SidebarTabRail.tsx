@@ -54,20 +54,15 @@ export function SidebarTabRail({
   const handleSelect = useCallback(
     (section: RailSection) => {
       const ui = useUIStore.getState()
-      // Agents has no sidebar panel, only a main page
-      if (section === 'agents') {
-        ui.setRailSection('agents')
-        if (isMobile) ui.setLeftSidebarVisible(false)
-        return
-      }
-      if (ui.railSection !== 'workspace') {
-        ui.setRailSection('workspace')
+      // Switching section shows its panel; the active section toggles it
+      if (ui.railSection !== section) {
+        ui.setRailSection(section)
         if (togglesSidebar) ui.setLeftSidebarVisible(true)
         return
       }
       if (togglesSidebar) ui.setLeftSidebarVisible(!ui.leftSidebarVisible)
     },
-    [togglesSidebar, isMobile]
+    [togglesSidebar]
   )
 
   const handleOpenSettings = useCallback(() => {

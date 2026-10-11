@@ -101,9 +101,19 @@ describe('SidebarTabRail', () => {
     expect(useUIStore.getState().leftSidebarVisible).toBe(true)
   })
 
-  it('closes the mobile drawer when Agents is clicked', async () => {
+  it('keeps the mobile drawer open to show the Agents list', async () => {
     mocks.isMobile = true
+    useUIStore.setState({ leftSidebarVisible: true })
     render(<SidebarTabRail />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Agents' }))
+
+    expect(useUIStore.getState().railSection).toBe('agents')
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+  })
+
+  it('hides the desktop sidebar when the active Agents tab is clicked', async () => {
+    useUIStore.setState({ railSection: 'agents', leftSidebarVisible: true })
+    render(<SidebarTabRail togglesSidebar />)
     await userEvent.click(screen.getByRole('tab', { name: 'Agents' }))
 
     expect(useUIStore.getState().railSection).toBe('agents')
