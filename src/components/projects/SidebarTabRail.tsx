@@ -11,7 +11,10 @@ import { FALLBACK_APP_VERSION } from '@/lib/app-version'
 import { openExternal } from '@/lib/platform'
 import { useUIStore, type RailSection } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useAgentsEnabled, useShowAgents } from '@/components/agents/agents'
+import {
+  useAgentsEnabled,
+  useShowAgents,
+} from '@/components/agents/agents-feature'
 
 /** Top-level Jean features */
 const SECTIONS: { section: RailSection; label: string; Icon: typeof Code }[] = [

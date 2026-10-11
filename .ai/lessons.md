@@ -119,3 +119,12 @@
 - Subscribe list rows to their own slice. Mount store-heavy subscriptions only in the expanded child that needs them.
 - Do not mount hidden heavy content (collapsed Markdown, diffs, stats). Tick timers in the smallest leaf component.
 - Keep heavy libraries (xterm, diff editors) behind dynamic `import()` so core services do not pull them into the boot bundle.
+
+## Keep giant async dispatchers small
+
+- `dispatch_command` and Jean MCP `run_tool` already use most of a debug worker stack. Add new command groups as a separate async fn called through `Box::pin`, never as new inline arms.
+- Test Jean MCP changes against an isolated debug `jean-server` (own `JEAN_DATA_DIR`, port and temporary `HOME` with linked CLI credentials), so the global CLI MCP configs and the user's servers are not touched.
+
+## Backend-created sessions need an explicit mode
+
+- A session without a metadata file loads with the legacy Plan default. Sessions created by the backend (not the UI) must save their execution mode, or tools that Plan mode blocks (Jean MCP) fail.

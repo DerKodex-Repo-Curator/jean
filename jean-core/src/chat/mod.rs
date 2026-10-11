@@ -12,7 +12,6 @@ pub(crate) mod cursor;
 pub mod detached;
 pub(crate) mod grok;
 pub(crate) mod handoff;
-pub mod jean_agent;
 pub mod jean_mcp;
 pub(crate) mod kimi;
 mod mcp_auth;

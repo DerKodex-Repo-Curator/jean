@@ -209,6 +209,9 @@ export function applyCacheInvalidationKeys(
           queryKey: ['recent-worktrees'],
         })
         break
+      case 'agents':
+        queryClient.invalidateQueries({ queryKey: ['agents'] })
+        break
       case 'unread-sessions':
         // A new run started: the session is no longer "finished".
         queryClient.invalidateQueries({

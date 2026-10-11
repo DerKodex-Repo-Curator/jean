@@ -171,7 +171,7 @@ const CloseWorktreeDialog = lazy(() =>
 import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
 import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
-import { useShowAgents } from '@/components/agents/agents'
+import { useShowAgents } from '@/components/agents/agents-feature'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'

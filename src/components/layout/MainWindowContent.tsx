@@ -22,7 +22,7 @@ import { scheduleIdleWork } from '@/lib/idle'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
 import { AgentPage } from '@/components/agents/AgentPage'
-import { useShowAgents } from '@/components/agents/agents'
+import { useShowAgents } from '@/components/agents/agents-feature'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({

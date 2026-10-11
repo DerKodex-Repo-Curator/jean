@@ -54,6 +54,10 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "unarchive_session",
     "unarchive_worktree",
     "unlink_worktree_pr",
+    // Agent tools that write
+    "schedule_create",
+    "memory_save",
+    "message_agent",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
 const MAX_MCP_DIFF_BYTES: usize = 200_000;
@@ -216,6 +220,9 @@ pub fn tool_registry() -> Value {
     if let Some(ship) = tool_registry_ship_loop().as_array() {
         tools.extend(ship.iter().cloned());
     }
+    if let Some(agent_tools) = crate::agents::mcp::tool_definitions().as_array() {
+        tools.extend(agent_tools.iter().cloned());
+    }
     Value::Array(tools)
 }
 
@@ -372,7 +379,11 @@ pub async fn call_tool(
         }
     }
 
-    let result_json = run_tool(app, name, arguments, source).await?;
+    // Agent sessions need the user's approval for destructive tools.
+    let result_json = match crate::agents::mcp::approval_gate(app, name, &arguments, source) {
+        Some(pending) => pending,
+        None => run_tool(app, name, arguments, source).await?,
+    };
     Ok(json!({
         "content": [{
             "type": "text",
@@ -380,6 +391,21 @@ pub async fn call_tool(
         }],
         "isError": false,
     }))
+}
+
+/// Run a tool that the user approved for an agent (no approval gate).
+/// Boxed: approvals are decided through `dispatch_command`, which this tool
+/// call can reach again, so the future type would otherwise be recursive.
+pub fn run_approved_tool(
+    app: AppHandle,
+    name: String,
+    args: Value,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>> {
+    Box::pin(async move {
+        run_tool(&app, &name, args, "agent-approval")
+            .await
+            .map_err(|e| e.message)
+    })
 }
 
 async fn run_tool(
@@ -1032,6 +1058,8 @@ async fn run_tool(
                     "ultracode",
                 ],
             )?;
+            // Agent callers: the agent gets an update when this session's run ends.
+            crate::agents::mcp::record_delegation(app, source, &session_id, &worktree_id);
             let mut payload = serde_json::Map::new();
             payload.insert("sessionId".to_string(), Value::String(session_id.clone()));
             payload.insert("worktreeId".to_string(), Value::String(worktree_id));
@@ -1873,6 +1901,12 @@ async fn run_tool(
             )
         }
         CLAUDE_PERMISSION_PROMPT_TOOL => Ok(claude_permission_prompt(app, source, &args).await),
+        // Boxed: keeps this large function's stack frame small.
+        agent_tool if crate::agents::mcp::is_agent_tool(agent_tool) => {
+            Box::pin(crate::agents::mcp::run(app, agent_tool, &args, source))
+                .await
+                .map_err(ToolError::invalid_params)
+        }
         other => Err(ToolError::invalid_params(format!("Unknown tool: {other}"))),
     }
 }
@@ -2973,6 +3007,10 @@ fn resolve_project_path(app: &AppHandle, project_id: &str) -> Result<String, Too
 }
 
 fn resolve_worktree_path(app: &AppHandle, worktree_id: &str) -> Result<String, ToolError> {
+    // Agent sessions run in their scratch folder (no worktree record).
+    if let Some(path) = crate::agents::workdir_for_worktree(app, worktree_id) {
+        return Ok(path);
+    }
     let data = crate::projects::storage::load_projects_data(app)
         .map_err(|e| ToolError::internal(format!("load_projects_data: {e}")))?;
     data.find_worktree(worktree_id)
@@ -3004,10 +3042,17 @@ fn resolve_session_worktree(
     session_id: &str,
 ) -> Result<(String, String), ToolError> {
     let metadata = crate::chat::storage::load_metadata(app, session_id)
-        .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
-        .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
-    let worktree_path = resolve_worktree_path(app, &metadata.worktree_id)?;
-    Ok((metadata.worktree_id, worktree_path))
+        .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?;
+    // New sessions have no metadata until their first run (e.g. right after
+    // create_session): find them in the session indexes.
+    let worktree_id = match metadata {
+        Some(metadata) => metadata.worktree_id,
+        None => crate::chat::storage::find_session_worktree_id(app, session_id)
+            .map_err(ToolError::internal)?
+            .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?,
+    };
+    let worktree_path = resolve_worktree_path(app, &worktree_id)?;
+    Ok((worktree_id, worktree_path))
 }
 
 /// Reject MCP mutations/runs when the worktree is archived.
@@ -3044,12 +3089,14 @@ fn ensure_mcp_session_can_run(
     session_id: &str,
     worktree_id: &str,
 ) -> Result<(), ToolError> {
-    let metadata = crate::chat::storage::load_metadata(app, session_id)
+    // A new session (no metadata until its first run) cannot be archived yet.
+    // Callers resolve the session first, so it is known to exist.
+    let archived_at = crate::chat::storage::load_metadata(app, session_id)
         .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
-        .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
+        .and_then(|metadata| metadata.archived_at);
     crate::chat::ensure_session_can_run(
         session_id,
-        metadata.archived_at,
+        archived_at,
         worktree_id,
         crate::chat::worktree_archived_at(app, worktree_id),
     )

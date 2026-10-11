@@ -1846,13 +1846,17 @@ pub fn resume_codex_after_crash(
 /// Give this thread's agent-browser MCP server its own browser session, so
 /// parallel Jean sessions do not share one browser.
 fn apply_agent_browser_session(params: &mut serde_json::Value, session_id: &str) {
-    let Some((key, value)) = crate::agent_browser::codex_session_config_override(session_id) else {
-        return;
-    };
-    if !params["config"].is_object() {
-        params["config"] = serde_json::json!({});
+    let overrides = [
+        crate::agent_browser::codex_session_config_override(session_id),
+        // Jean MCP must see the real session (agents, approvals, current context).
+        crate::jean_mcp_config::codex_session_config_override(session_id),
+    ];
+    for (key, value) in overrides.into_iter().flatten() {
+        if !params["config"].is_object() {
+            params["config"] = serde_json::json!({});
+        }
+        params["config"][key] = value;
     }
-    params["config"][key] = value;
 }
 
 fn start_new_thread(

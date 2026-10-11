@@ -3546,11 +3546,11 @@ pub async fn send_chat_message(
 
     // Use passed parameter for parallel execution prompt (None = disabled)
     let parallel_execution_prompt = parallel_execution_prompt.filter(|p| !p.trim().is_empty());
-    // Jean agent: append its coordinator prompt. Every backend receives this prompt.
-    let parallel_execution_prompt = match super::jean_agent::system_prompt_for(&worktree_id) {
+    // Agent sessions: append the agent prompt (role, tools, memory). Every backend receives this prompt.
+    let parallel_execution_prompt = match crate::agents::system_prompt_for(&app, &worktree_id) {
         Some(agent_prompt) => Some(match parallel_execution_prompt {
             Some(prompt) => format!("{prompt}\n\n{agent_prompt}"),
-            None => agent_prompt.to_string(),
+            None => agent_prompt,
         }),
         None => parallel_execution_prompt,
     };

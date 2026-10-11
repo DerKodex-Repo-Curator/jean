@@ -516,6 +516,47 @@ pub fn list_all_session_ids(app: &AppHandle) -> Result<Vec<String>, String> {
     Ok(session_ids)
 }
 
+/// Worktree ID of a session, from the session index files. New sessions have
+/// no metadata file until their first run, so callers that only have a
+/// session ID (Jean MCP) use this as a fallback.
+pub fn find_session_worktree_id(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    find_session_worktree_id_in_dir(&get_index_dir(app)?, session_id)
+}
+
+fn find_session_worktree_id_in_dir(
+    index_dir: &Path,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    let entries = fs::read_dir(index_dir)
+        .map_err(|e| format!("Failed to read session index directory: {e}"))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        // Cheap filter before parsing every index file.
+        if !text.contains(session_id) {
+            continue;
+        }
+        let Ok(index) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let has_session = index["sessions"]
+            .as_array()
+            .is_some_and(|sessions| sessions.iter().any(|s| s["id"] == session_id));
+        if has_session {
+            return Ok(index["worktree_id"].as_str().map(str::to_string));
+        }
+    }
+    Ok(None)
+}
+
 /// Delete orphaned session data directories that are not referenced by any index file.
 /// Returns the number of orphaned directories deleted.
 pub fn cleanup_orphaned_session_data(app: &AppHandle) -> Result<u32, String> {
@@ -604,10 +645,8 @@ fn cleanup_orphaned_session_indexes_in_dir(
             continue;
         };
 
-        // Jean agent sessions use a reserved ID with no worktree record.
-        if valid_index_stems.contains(stem)
-            || stem == sanitize_filename(super::jean_agent::JEAN_AGENT_WORKTREE_ID)
-        {
+        // Agent sessions use reserved IDs with no worktree record.
+        if valid_index_stems.contains(stem) || crate::agents::is_agent_worktree_id(stem) {
             continue;
         }
 
@@ -1472,6 +1511,30 @@ mod tests {
     }
 
     #[test]
+    fn find_session_worktree_id_reads_index_files() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let index = serde_json::json!({
+            "worktree_id": "wt-1",
+            "sessions": [{ "id": "s-1" }, { "id": "s-2" }],
+        });
+        std::fs::write(temp.path().join("wt-1.json"), index.to_string()).unwrap();
+        std::fs::write(temp.path().join("broken.json"), "{ s-3").unwrap();
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-2").unwrap(),
+            Some("wt-1".to_string())
+        );
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-3").unwrap(),
+            None
+        );
+        // A substring match alone (no session with that ID) is not a match.
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-").unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn test_cleanup_orphaned_session_indexes_keeps_linked_and_base_indexes() {
         use std::collections::HashSet;
 
@@ -1483,8 +1546,10 @@ mod tests {
         std::fs::write(index_dir.join("orphan-wt.json"), "{}").expect("write orphan index");
         std::fs::write(index_dir.join("base-old-project.json"), "{}").expect("write stale base");
         std::fs::write(index_dir.join("notes.txt"), "ignore").expect("write non-json");
-        let jean_agent_index = format!("{}.json", crate::chat::jean_agent::JEAN_AGENT_WORKTREE_ID);
-        std::fs::write(index_dir.join(&jean_agent_index), "{}").expect("write jean agent index");
+        let jean_agent_index = "__jean_agent__.json";
+        let custom_agent_index = "__agent_reviewer__.json";
+        std::fs::write(index_dir.join(jean_agent_index), "{}").expect("write jean agent index");
+        std::fs::write(index_dir.join(custom_agent_index), "{}").expect("write agent index");
 
         let valid_stems = HashSet::from(["wt-1".to_string(), "base-project-1".to_string()]);
 
@@ -1497,7 +1562,8 @@ mod tests {
         assert!(!index_dir.join("orphan-wt.json").exists());
         assert!(!index_dir.join("base-old-project.json").exists());
         assert!(index_dir.join("notes.txt").exists());
-        assert!(index_dir.join(&jean_agent_index).exists());
+        assert!(index_dir.join(jean_agent_index).exists());
+        assert!(index_dir.join(custom_agent_index).exists());
     }
 
     #[test]

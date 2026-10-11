@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import { ProjectsSidebar } from '@/components/projects'
 import { AgentsSidebar } from '@/components/agents/AgentsSidebar'
-import { useShowAgents } from '@/components/agents/agents'
+import { useShowAgents } from '@/components/agents/agents-feature'
 
 interface LeftSideBarProps {
   children?: React.ReactNode

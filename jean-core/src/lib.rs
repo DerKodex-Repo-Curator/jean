@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agent_browser;
+pub mod agents;
 mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
@@ -4686,6 +4687,19 @@ fn resolve_headless_token_required(
     }
 }
 
+/// Worker stack size of Jean's tokio runtimes. Debug builds keep very large
+/// async frames (the command and Jean MCP dispatchers), and any Jean MCP call
+/// overflowed tokio's 2 MiB default stack there.
+pub const RUNTIME_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+/// Multi-thread tokio runtime for the app and server entry points.
+pub fn build_tokio_runtime() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(RUNTIME_THREAD_STACK_SIZE)
+        .build()
+}
+
 /// Initialize the shared runtime used by both transport adapters.
 pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     let (broadcaster, _) = http_server::WsBroadcaster::new();
@@ -4710,6 +4724,11 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     task_manager.start();
     context.manage(task_manager);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
+    // Agents keep working without clients: open their database and start the loop.
+    match agents::init(context) {
+        Ok(()) => agents::start(context.clone()),
+        Err(error) => log::error!("Agents are unavailable: {error}"),
+    }
 
     let cleanup_context = context.clone();
     async_runtime::spawn_blocking(move || {
