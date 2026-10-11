@@ -1338,6 +1338,7 @@ export interface AppPreferences {
   auto_pull_base_branch: boolean // Auto-pull base branch before creating a new worktree
   auto_archive_on_pr_merged: boolean // Auto-archive worktrees when their PR is merged
   debug_mode_enabled: boolean // Show debug panel in chat sessions
+  agents_enabled?: boolean // Experimental: show the Agents tab
   default_enabled_mcp_servers: string[] // MCP server names enabled by default (empty = none)
   known_mcp_servers: string[] // All MCP server names ever seen (prevents re-enabling user-disabled servers)
   has_seen_feature_tour: boolean // Whether user has seen the feature tour onboarding
@@ -2498,6 +2499,7 @@ export const defaultPreferences: AppPreferences = {
   auto_pull_base_branch: true, // Default: enabled
   auto_archive_on_pr_merged: true, // Default: enabled
   debug_mode_enabled: false, // Default: disabled
+  agents_enabled: false, // Default: disabled (experimental)
   default_enabled_mcp_servers: [], // Default: no MCP servers enabled
   known_mcp_servers: [], // Default: no known servers
   has_seen_feature_tour: false, // Default: not seen

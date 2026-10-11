@@ -15,6 +15,9 @@ vi.mock('@/services/projects', () => ({
   useProjects: () => ({ data: [] }),
 }))
 
+vi.mock('@/services/preferences', () => ({
+  usePreferences: () => ({ data: undefined }),
+}))
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: () => ({
     installedBackends: ['claude'],

@@ -22,6 +22,7 @@ import { scheduleIdleWork } from '@/lib/idle'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
 import { AgentPage } from '@/components/agents/AgentPage'
+import { useShowAgents } from '@/components/agents/agents'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -53,7 +54,7 @@ export const MainWindowContent = memo(function MainWindowContent({
   sidebarSwipeIndicator,
 }: MainWindowContentProps) {
   const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
-  const showAgents = useUIStore(state => state.railSection === 'agents')
+  const showAgents = useShowAgents()
   const isMobile = useIsMobile()
 
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)

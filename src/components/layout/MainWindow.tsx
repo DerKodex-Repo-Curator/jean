@@ -171,6 +171,7 @@ const CloseWorktreeDialog = lazy(() =>
 import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
 import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
+import { useShowAgents } from '@/components/agents/agents'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
@@ -343,7 +344,7 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
-  const showAgents = useUIStore(state => state.railSection === 'agents')
+  const showAgents = useShowAgents()
 
   // Compute window title based on selected project/worktree
   // On mobile, show only the project name to fit the compact title bar.

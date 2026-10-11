@@ -11,6 +11,7 @@ import { FALLBACK_APP_VERSION } from '@/lib/app-version'
 import { openExternal } from '@/lib/platform'
 import { useUIStore, type RailSection } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useAgentsEnabled, useShowAgents } from '@/components/agents/agents'
 
 /** Top-level Jean features */
 const SECTIONS: { section: RailSection; label: string; Icon: typeof Code }[] = [
@@ -38,7 +39,12 @@ export function SidebarTabRail({
   className,
   children,
 }: SidebarTabRailProps) {
-  const railSection = useUIStore(state => state.railSection)
+  const agentsEnabled = useAgentsEnabled()
+  // Disabled Agents falls back to Workspace
+  const railSection: RailSection = useShowAgents() ? 'agents' : 'workspace'
+  const sections = agentsEnabled
+    ? SECTIONS
+    : SECTIONS.filter(({ section }) => section !== 'agents')
   const isMobile = useIsMobile()
   const [appVersion, setAppVersion] = useState(FALLBACK_APP_VERSION)
 
@@ -55,14 +61,18 @@ export function SidebarTabRail({
     (section: RailSection) => {
       const ui = useUIStore.getState()
       // Switching section shows its panel; the active section toggles it
-      if (ui.railSection !== section) {
+      const current =
+        ui.railSection === 'agents' && !agentsEnabled
+          ? 'workspace'
+          : ui.railSection
+      if (current !== section) {
         ui.setRailSection(section)
         if (togglesSidebar) ui.setLeftSidebarVisible(true)
         return
       }
       if (togglesSidebar) ui.setLeftSidebarVisible(!ui.leftSidebarVisible)
     },
-    [togglesSidebar]
+    [togglesSidebar, agentsEnabled]
   )
 
   const handleOpenSettings = useCallback(() => {
@@ -87,7 +97,7 @@ export function SidebarTabRail({
         aria-label="Jean features"
         aria-orientation="vertical"
       >
-        {SECTIONS.map(({ section, label, Icon }) => {
+        {sections.map(({ section, label, Icon }) => {
           // Active = open section, even when the Workspace list is collapsed
           const selected = railSection === section
           return (

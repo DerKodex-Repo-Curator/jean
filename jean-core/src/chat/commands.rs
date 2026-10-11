@@ -7051,7 +7051,13 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
     }
 
     // Read the file content
-    std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {e}"))
+    std::fs::read_to_string(&file_path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::InvalidData {
+            "Binary file cannot be previewed".to_string()
+        } else {
+            format!("Failed to read file: {e}")
+        }
+    })
 }
 
 /// Binary file payload for UI preview (images outside project asset scope, etc.).
@@ -7077,11 +7083,15 @@ fn mime_type_from_path(path: &std::path::Path) -> &'static str {
         Some("bmp") => "image/bmp",
         Some("ico") => "image/x-icon",
         Some("avif") => "image/avif",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        Some("ogv") => "video/ogg",
         _ => "application/octet-stream",
     }
 }
 
-/// Read a file as base64 for binary preview (e.g. images under /tmp).
+/// Read a file as base64 for binary preview (e.g. images or videos under /tmp).
 ///
 /// Same size limit as `read_file_content`. Used when asset:// and
 /// /api/project-files cannot serve paths outside project roots.

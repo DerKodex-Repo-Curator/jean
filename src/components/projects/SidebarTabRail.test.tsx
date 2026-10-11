@@ -5,12 +5,18 @@ import { SidebarTabRail } from './SidebarTabRail'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 
-const mocks = vi.hoisted(() => ({ isMobile: false }))
+const mocks = vi.hoisted(() => ({ isMobile: false, agentsEnabled: true }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }))
+vi.mock('@/services/preferences', () => ({
+  usePreferences: () => ({
+    data: { agents_enabled: mocks.agentsEnabled },
+  }),
+}))
 
 describe('SidebarTabRail', () => {
   beforeEach(() => {
     mocks.isMobile = false
+    mocks.agentsEnabled = true
     useProjectsStore.setState({ sidebarActiveTab: 'projects' })
     useUIStore.setState({
       leftSidebarVisible: true,
@@ -23,6 +29,26 @@ describe('SidebarTabRail', () => {
     render(<SidebarTabRail />)
 
     expect(screen.getAllByRole('tab')).toHaveLength(2)
+    expect(
+      screen
+        .getByRole('tab', { name: 'Workspace' })
+        .getAttribute('aria-selected')
+    ).toBe('true')
+  })
+
+  it('hides the Agents tab when agents are disabled', () => {
+    mocks.agentsEnabled = false
+    render(<SidebarTabRail />)
+
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
+    expect(screen.queryByRole('tab', { name: 'Agents' })).toBeNull()
+  })
+
+  it('shows Workspace as active when Agents was selected but is disabled', () => {
+    mocks.agentsEnabled = false
+    useUIStore.setState({ railSection: 'agents' })
+    render(<SidebarTabRail />)
+
     expect(
       screen
         .getByRole('tab', { name: 'Workspace' })

@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import { ProjectsSidebar } from '@/components/projects'
 import { AgentsSidebar } from '@/components/agents/AgentsSidebar'
-import { useUIStore } from '@/store/ui-store'
+import { useShowAgents } from '@/components/agents/agents'
 
 interface LeftSideBarProps {
   children?: React.ReactNode
@@ -9,7 +9,7 @@ interface LeftSideBarProps {
 }
 
 export function LeftSideBar({ children, className }: LeftSideBarProps) {
-  const showAgents = useUIStore(state => state.railSection === 'agents')
+  const showAgents = useShowAgents()
   return (
     <div
       className={cn(

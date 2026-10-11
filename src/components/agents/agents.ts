@@ -1,5 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import { JeanAgentIcon } from '@/components/icons/JeanAgentIcon'
+import { usePreferences } from '@/services/preferences'
+import { useUIStore } from '@/store/ui-store'
 
 export interface AgentDefinition {
   id: string
@@ -25,4 +27,16 @@ export const AGENTS: AgentDefinition[] = [
 /** Agent by ID, or the first agent when the ID is unknown. */
 export function findAgent(id: string | null | undefined): AgentDefinition {
   return AGENTS.find(agent => agent.id === id) ?? (AGENTS[0] as AgentDefinition)
+}
+
+/** Agents feature is on (Experimental setting, off by default). */
+export function useAgentsEnabled(): boolean {
+  const { data: preferences } = usePreferences()
+  return preferences?.agents_enabled ?? false
+}
+
+/** Agents page is open: section selected and feature enabled. */
+export function useShowAgents(): boolean {
+  const agentsSelected = useUIStore(state => state.railSection === 'agents')
+  return useAgentsEnabled() && agentsSelected
 }
