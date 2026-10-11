@@ -247,7 +247,10 @@ export function RecentWorktreesList({
           },
         })
       )
-      if (isMobile) useUIStore.getState().setLeftSidebarVisible(false)
+      const ui = useUIStore.getState()
+      // Leave the Agents page so the project canvas can open the session
+      ui.setRailSection('workspace')
+      if (isMobile) ui.setLeftSidebarVisible(false)
     },
     [isMobile, queryClient, selectProject, selectWorktree]
   )
