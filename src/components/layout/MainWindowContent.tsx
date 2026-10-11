@@ -22,6 +22,7 @@ import { scheduleIdleWork } from '@/lib/idle'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
 import { AgentPage } from '@/components/agents/AgentPage'
+import { AgentNotificationsListener } from '@/components/agents/AgentNotificationsListener'
 import { useShowAgents } from '@/components/agents/agents-feature'
 
 const ChatWindow = lazy(() =>
@@ -194,6 +195,7 @@ export const MainWindowContent = memo(function MainWindowContent({
         className
       )}
     >
+      <AgentNotificationsListener />
       {sidebarSwipeIndicator?.isSwiping && (
         <div
           className="pointer-events-none absolute top-1/2 z-[60] flex -translate-y-1/2 items-center justify-center"

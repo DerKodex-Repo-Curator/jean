@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Play, PauseCircle, Trash2 } from '@/components/icons/reicon'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
@@ -20,10 +20,12 @@ import {
   useUpdateAgent,
   type AgentSummary,
 } from '@/services/agents'
+import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { agentStatusLabel, useSelectedAgent } from './agents'
 import { AgentActivity, PendingApprovals } from './AgentActivity'
 import { AgentMemoryView } from './AgentMemoryView'
+import { AgentTasks } from './AgentTasks'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -37,7 +39,7 @@ const LOADING = (
   </div>
 )
 
-type AgentTab = 'chat' | 'activity' | 'memory'
+type AgentTab = 'chat' | 'tasks' | 'activity' | 'memory'
 
 function unavailableMessage(error: unknown): string {
   return String(error).includes('Unknown command')
@@ -65,6 +67,15 @@ export function AgentPage() {
 function AgentPageContent({ agent }: { agent: AgentSummary }) {
   const [tab, setTab] = useState<AgentTab>('chat')
   const { data: workdir, error } = useAgentWorkdir(agent.id)
+  // The chat tab always shows the agent's current chat (a long chat
+  // continues in a new one).
+  useEffect(() => {
+    if (!agent.homeSessionId) return
+    const chat = useChatStore.getState()
+    if (chat.activeSessionIds[agent.worktreeId] !== agent.homeSessionId) {
+      chat.setActiveSession(agent.worktreeId, agent.homeSessionId)
+    }
+  }, [agent.worktreeId, agent.homeSessionId])
   const updateAgent = useUpdateAgent()
   const deleteAgent = useDeleteAgent()
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -93,9 +104,20 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
       }
     )
 
-  const tabs: { id: AgentTab; label: string; badge?: number }[] = [
+  const tabs: {
+    id: AgentTab
+    label: string
+    badge?: number
+    /** Amber = needs the user; muted = information only */
+    muted?: boolean
+  }[] = [
     { id: 'chat', label: 'Chat' },
-    { id: 'activity', label: 'Activity', badge: agent.pendingApprovals },
+    { id: 'tasks', label: 'Tasks', badge: agent.runningTasks, muted: true },
+    {
+      id: 'activity',
+      label: 'Activity',
+      badge: agent.pendingApprovals + agent.unreadNotifications,
+    },
     { id: 'memory', label: 'Memory' },
   ]
 
@@ -153,7 +175,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
         role="tablist"
         aria-label="Agent view"
       >
-        {tabs.map(({ id, label, badge }) => (
+        {tabs.map(({ id, label, badge, muted }) => (
           <button
             key={id}
             type="button"
@@ -169,7 +191,14 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
           >
             {label}
             {badge ? (
-              <span className="rounded-full bg-amber-500 px-1.5 text-[10px] leading-4 text-white">
+              <span
+                className={cn(
+                  'rounded-full px-1.5 text-[10px] leading-4',
+                  muted
+                    ? 'bg-muted-foreground/20 text-foreground'
+                    : 'bg-amber-500 text-white'
+                )}
+              >
                 {badge}
               </span>
             ) : null}
@@ -201,6 +230,8 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               LOADING
             )}
           </>
+        ) : tab === 'tasks' ? (
+          <AgentTasks agent={agent} workdir={workdir} />
         ) : tab === 'activity' ? (
           <AgentActivity agent={agent} />
         ) : (

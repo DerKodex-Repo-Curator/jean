@@ -25,6 +25,8 @@ const AGENT_TOOLS: &[&str] = &[
     "memory_update",
     "memory_forget",
     "message_agent",
+    "notify_user",
+    "task_list",
 ];
 
 const MIN_EVERY_MINUTES: i64 = 5;
@@ -44,7 +46,9 @@ pub fn tool_definitions() -> Value {
         {"name":"memory_search","description":"Agent sessions only. Full-text search of your memories and shared memories. Without query: pinned and newest first.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
         {"name":"memory_update","description":"Agent sessions only. Change the content, kind, or pinned flag of a memory.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"pinned":{"type":"boolean"}},"required":["memoryId"],"additionalProperties":false}},
         {"name":"memory_forget","description":"Agent sessions only. Delete a memory that is wrong or no longer needed.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"}},"required":["memoryId"],"additionalProperties":false}},
-        {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}}
+        {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}},
+        {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
+        {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}}
     ])
 }
 
@@ -198,10 +202,46 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
                     "Request from agent {} (`{}`):\n\n{}\n\nYour final reply in this turn is sent back to {} automatically.",
                     agent.name, agent.id, message, agent.name
                 );
-                db::add_event(conn, &target.id, "message", &body, hop, Some(&agent.id))?;
+                let title = format!("Request from {}", agent.name);
+                db::add_event(
+                    conn,
+                    &db::NewEvent {
+                        agent_id: &target.id,
+                        kind: "message",
+                        title: &title,
+                        body: &body,
+                        hop,
+                        reply_to_agent: Some(&agent.id),
+                        reply_to_session: Some(source),
+                        ..Default::default()
+                    },
+                )?;
                 Ok(())
             })?;
             json!({ "agentId": target_id, "status": "sent", "note": "The answer arrives as an update message. End your turn now." })
+        }
+        "notify_user" => {
+            let message = required_str(args, "message")?;
+            let level = str_arg(args, "level").unwrap_or_else(|| "info".to_string());
+            let notification = super::with_db(app, |conn| {
+                db::add_notification(conn, &agent.id, Some(source), &level, &message)
+            })?;
+            use crate::http_server::EmitExt;
+            let _ = app.emit_all(
+                "agents:notification",
+                &json!({
+                    "agentId": agent.id,
+                    "agentName": agent.name,
+                    "level": notification.level,
+                    "message": notification.message,
+                }),
+            );
+            json!({ "notificationId": notification.id, "status": "sent" })
+        }
+        "task_list" => {
+            let limit = int_arg(args, "limit").unwrap_or(20).clamp(1, 50);
+            let tasks = super::with_db(app, |conn| db::list_tasks(conn, &agent.id, limit))?;
+            json!({ "tasks": tasks })
         }
         _ => return Err(format!("Unknown agent tool: {name}")),
     };
@@ -217,7 +257,9 @@ pub fn approval_gate(app: &AppHandle, name: &str, args: &Value, source: &str) ->
         return None;
     }
     let agent = super::agent_for_session(app, source)?;
-    let result = super::with_db(app, |conn| db::create_approval(conn, &agent.id, name, args));
+    let result = super::with_db(app, |conn| {
+        db::create_approval(conn, &agent.id, Some(source), name, args)
+    });
     super::notify_changed(app);
     Some(match result {
         Ok(id) => json!({
@@ -250,7 +292,15 @@ pub fn record_delegation(
     };
     let result = super::with_db(app, |conn| {
         let hop = db::active_hop_for_session(conn, source)?;
-        db::upsert_delegation(conn, &agent.id, target_session_id, target_worktree_id, hop)
+        // The update returns to this calling session (chat or task).
+        db::upsert_delegation(
+            conn,
+            &agent.id,
+            target_session_id,
+            target_worktree_id,
+            hop,
+            Some(source),
+        )
     });
     match result {
         Ok(()) => super::notify_changed(app),

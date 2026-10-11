@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentApproval, AgentSummary } from '@/services/agents'
 import { agentStatusLabel, findAgent } from './agents'
 import { describeApproval, formatRelative } from './AgentActivity'
+import { taskStatusLabel } from './AgentTasks'
 
 function agent(overrides: Partial<AgentSummary>): AgentSummary {
   return {
@@ -21,6 +22,9 @@ function agent(overrides: Partial<AgentSummary>): AgentSummary {
     activeDelegations: 0,
     nextScheduleAt: null,
     budgetReached: false,
+    tasksWorktreeId: '__agent_tasks_jean__',
+    runningTasks: 0,
+    unreadNotifications: 0,
     ...overrides,
   }
 }
@@ -37,6 +41,12 @@ describe('agentStatusLabel', () => {
 
   it('shows work, waiting, budget and followed sessions', () => {
     expect(agentStatusLabel(agent({ status: 'working' }))).toBe('Working')
+    expect(
+      agentStatusLabel(agent({ status: 'working', runningTasks: 2 }))
+    ).toBe('Working (2 tasks)')
+    expect(agentStatusLabel(agent({ unreadNotifications: 1 }))).toBe(
+      '1 new notification'
+    )
     expect(agentStatusLabel(agent({ status: 'waiting' }))).toBe(
       'Waiting for you'
     )
@@ -89,5 +99,12 @@ describe('describeApproval', () => {
     expect(describeApproval({ ...approval, tool: 'custom', args: {} })).toBe(
       'custom'
     )
+  })
+})
+
+describe('taskStatusLabel', () => {
+  it('explains waiting tasks', () => {
+    expect(taskStatusLabel('waiting')).toBe('waiting for sessions')
+    expect(taskStatusLabel('done')).toBe('done')
   })
 })

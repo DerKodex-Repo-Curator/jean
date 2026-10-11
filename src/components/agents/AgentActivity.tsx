@@ -7,7 +7,9 @@ import {
   useAgentDetails,
   useCancelAgentSchedule,
   useDecideAgentApproval,
+  useMarkAgentNotificationsRead,
   type AgentApproval,
+  type AgentNotification,
   type AgentDelegation,
   type AgentSchedule,
   type AgentSummary,
@@ -260,9 +262,44 @@ function Section({
   )
 }
 
-/** Approvals, followed sessions and schedules of an agent. */
+const LEVEL_STYLES: Record<string, string> = {
+  action: 'border-amber-500/40 bg-amber-500/5',
+  error: 'border-destructive/40 bg-destructive/5',
+  info: '',
+}
+
+function NotificationRow({
+  notification,
+}: {
+  notification: AgentNotification
+}) {
+  return (
+    <li
+      className={cn(
+        'rounded-md border px-3 py-2',
+        LEVEL_STYLES[notification.level],
+        notification.readAt !== null && 'opacity-60'
+      )}
+    >
+      <p className="whitespace-pre-wrap break-words text-sm text-foreground">
+        {notification.message}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {notification.level === 'action'
+          ? 'Needs you'
+          : notification.level === 'error'
+            ? 'Error'
+            : 'Info'}{' '}
+        · {formatRelative(notification.createdAt)}
+      </p>
+    </li>
+  )
+}
+
+/** Inbox, approvals, followed sessions and schedules of an agent. */
 export function AgentActivity({ agent }: { agent: AgentSummary }) {
   const { data, isLoading } = useAgentDetails(agent.id)
+  const markRead = useMarkAgentNotificationsRead()
   if (isLoading || !data) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -278,6 +315,37 @@ export function AgentActivity({ agent }: { agent: AgentSummary }) {
           until the next hour.
         </p>
       )}
+      <section className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Inbox
+          </h3>
+          {agent.unreadNotifications > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={markRead.isPending}
+              onClick={() => markRead.mutate({ agentId: agent.id })}
+            >
+              Mark all read
+            </Button>
+          )}
+        </div>
+        {data.notifications.length > 0 ? (
+          <ul className="space-y-2">
+            {data.notifications.map(notification => (
+              <NotificationRow
+                key={notification.id}
+                notification={notification}
+              />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Nothing yet. The agent reports results and questions here.
+          </p>
+        )}
+      </section>
       <Section title="Approvals" empty="No approval requests.">
         {data.approvals.map(approval => (
           <ApprovalRow key={approval.id} approval={approval} />

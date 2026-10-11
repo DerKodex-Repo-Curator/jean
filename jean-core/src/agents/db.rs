@@ -112,6 +112,41 @@ const MIGRATIONS: &[&str] = &[
         INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
     END;
     "#,
+    // v2: tasks (background work in its own sessions), routing of updates,
+    // user notifications, chat rotation carry-over.
+    r#"
+    ALTER TABLE delegations ADD COLUMN origin_session_id TEXT;
+    ALTER TABLE events ADD COLUMN title TEXT;
+    ALTER TABLE events ADD COLUMN target_session_id TEXT;
+    ALTER TABLE events ADD COLUMN reply_to_session TEXT;
+    ALTER TABLE approvals ADD COLUMN session_id TEXT;
+    ALTER TABLE agents ADD COLUMN carry_over TEXT;
+    CREATE TABLE tasks (
+        id INTEGER PRIMARY KEY,
+        agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary TEXT,
+        last_event TEXT,
+        check_after INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        archived_at INTEGER
+    );
+    CREATE INDEX tasks_agent ON tasks(agent_id, status);
+    CREATE TABLE notifications (
+        id INTEGER PRIMARY KEY,
+        agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        session_id TEXT,
+        level TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        read_at INTEGER
+    );
+    CREATE INDEX notifications_unread ON notifications(agent_id, read_at);
+    "#,
 ];
 
 const JEAN_ROLE_PROMPT: &str = "You are Jean, the coordinator agent of the Jean app. You are the boss of all the user's projects.
@@ -236,6 +271,21 @@ pub fn agent_worktree_id(agent_id: &str) -> String {
     } else {
         format!("__agent_{agent_id}__")
     }
+}
+
+/// Worktree ID of an agent's task sessions (background work), kept apart from
+/// its chat sessions. Agent IDs never contain `_`, so it cannot clash with a
+/// chat worktree ID.
+pub fn agent_tasks_worktree_id(agent_id: &str) -> String {
+    format!("__agent_tasks_{agent_id}__")
+}
+
+/// Agent ID of a task worktree ID.
+pub fn agent_id_from_tasks_worktree(worktree_id: &str) -> Option<&str> {
+    worktree_id
+        .strip_prefix("__agent_tasks_")
+        .and_then(|rest| rest.strip_suffix("__"))
+        .filter(|id| !id.is_empty())
 }
 
 /// True for worktree IDs reserved for agent sessions (never real worktrees).
@@ -370,9 +420,11 @@ pub struct Delegation {
     pub last_summary: Option<String>,
     pub check_after: Option<i64>,
     pub updated_at: i64,
+    /// Session that sent the work; its follow-up goes back there.
+    pub origin_session_id: Option<String>,
 }
 
-const DELEGATION_COLUMNS: &str = "id, agent_id, session_id, worktree_id, hop, status, last_event, last_error, last_summary, check_after, updated_at";
+const DELEGATION_COLUMNS: &str = "id, agent_id, session_id, worktree_id, hop, status, last_event, last_error, last_summary, check_after, updated_at, origin_session_id";
 
 fn delegation_from_row(row: &rusqlite::Row) -> rusqlite::Result<Delegation> {
     Ok(Delegation {
@@ -387,6 +439,7 @@ fn delegation_from_row(row: &rusqlite::Row) -> rusqlite::Result<Delegation> {
         last_summary: row.get(8)?,
         check_after: row.get(9)?,
         updated_at: row.get(10)?,
+        origin_session_id: row.get(11)?,
     })
 }
 
@@ -397,15 +450,17 @@ pub fn upsert_delegation(
     session_id: &str,
     worktree_id: &str,
     hop: i64,
+    origin_session_id: Option<&str>,
 ) -> Result<(), String> {
     let ts = now();
     conn.execute(
-        "INSERT INTO delegations (agent_id, session_id, worktree_id, hop, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?5)
+        "INSERT INTO delegations (agent_id, session_id, worktree_id, hop, status, origin_session_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?6)
          ON CONFLICT(agent_id, session_id) DO UPDATE SET
             status='active', hop=excluded.hop, worktree_id=excluded.worktree_id,
+            origin_session_id=excluded.origin_session_id,
             last_event=NULL, last_error=NULL, check_after=NULL, updated_at=excluded.updated_at",
-        params![agent_id, session_id, worktree_id, hop, ts],
+        params![agent_id, session_id, worktree_id, hop, origin_session_id, ts],
     )
     .map_err(err)?;
     Ok(())
@@ -517,19 +572,42 @@ pub struct AgentEvent {
     pub hop: i64,
     pub reply_to_agent: Option<String>,
     pub created_at: i64,
+    /// Title of the task session made for this event.
+    pub title: Option<String>,
+    /// Session that gets this update. `None` = a new task session.
+    pub target_session_id: Option<String>,
+    /// Session of `reply_to_agent` that waits for the answer.
+    pub reply_to_session: Option<String>,
 }
 
-pub fn add_event(
-    conn: &Connection,
-    agent_id: &str,
-    kind: &str,
-    body: &str,
-    hop: i64,
-    reply_to_agent: Option<&str>,
-) -> Result<i64, String> {
+/// A queued update for an agent.
+#[derive(Debug, Clone, Default)]
+pub struct NewEvent<'a> {
+    pub agent_id: &'a str,
+    pub kind: &'a str,
+    pub title: &'a str,
+    pub body: &'a str,
+    pub hop: i64,
+    pub target_session_id: Option<&'a str>,
+    pub reply_to_agent: Option<&'a str>,
+    pub reply_to_session: Option<&'a str>,
+}
+
+pub fn add_event(conn: &Connection, e: &NewEvent) -> Result<i64, String> {
     conn.execute(
-        "INSERT INTO events (agent_id, kind, body, hop, reply_to_agent, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![agent_id, kind, body, hop, reply_to_agent, now()],
+        "INSERT INTO events (agent_id, kind, title, body, hop, target_session_id, reply_to_agent, reply_to_session, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            e.agent_id,
+            e.kind,
+            e.title,
+            e.body,
+            e.hop,
+            e.target_session_id,
+            e.reply_to_agent,
+            e.reply_to_session,
+            now()
+        ],
     )
     .map_err(err)?;
     Ok(conn.last_insert_rowid())
@@ -538,8 +616,8 @@ pub fn add_event(
 pub fn pending_events(conn: &Connection, agent_id: &str) -> Result<Vec<AgentEvent>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, agent_id, kind, body, hop, reply_to_agent, created_at FROM events
-             WHERE agent_id=?1 AND delivered_at IS NULL ORDER BY id LIMIT 20",
+            "SELECT id, agent_id, kind, body, hop, reply_to_agent, created_at, title, target_session_id, reply_to_session
+             FROM events WHERE agent_id=?1 AND delivered_at IS NULL ORDER BY id LIMIT 50",
         )
         .map_err(err)?;
     let rows = stmt
@@ -552,6 +630,9 @@ pub fn pending_events(conn: &Connection, agent_id: &str) -> Result<Vec<AgentEven
                 hop: row.get(4)?,
                 reply_to_agent: row.get(5)?,
                 created_at: row.get(6)?,
+                title: row.get(7)?,
+                target_session_id: row.get(8)?,
+                reply_to_session: row.get(9)?,
             })
         })
         .map_err(err)?;
@@ -710,7 +791,16 @@ pub fn fire_due_schedules(conn: &Connection, at: i64) -> Result<Vec<Schedule>, S
             "Schedule #{} \"{}\" is due.\n\n{}",
             schedule.id, schedule.name, schedule.prompt
         );
-        add_event(conn, &schedule.agent_id, "schedule", &body, 0, None)?;
+        add_event(
+            conn,
+            &NewEvent {
+                agent_id: &schedule.agent_id,
+                kind: "schedule",
+                title: &schedule.name,
+                body: &body,
+                ..Default::default()
+            },
+        )?;
         match schedule.every_secs {
             Some(every) if every > 0 => conn.execute(
                 "UPDATE schedules SET last_run_at=?2, next_run_at=?3 WHERE id=?1",
@@ -744,6 +834,8 @@ pub fn next_schedule_at(conn: &Connection, agent_id: &str) -> Result<Option<i64>
 pub struct Approval {
     pub id: i64,
     pub agent_id: String,
+    /// Session that asked; the result goes back there.
+    pub session_id: Option<String>,
     pub tool: String,
     pub args: Value,
     pub status: String,
@@ -761,20 +853,22 @@ fn approval_from_row(row: &rusqlite::Row) -> rusqlite::Result<Approval> {
         status: row.get(4)?,
         result: row.get(5)?,
         created_at: row.get(6)?,
+        session_id: row.get(7)?,
     })
 }
 
-const APPROVAL_COLUMNS: &str = "id, agent_id, tool, args, status, result, created_at";
+const APPROVAL_COLUMNS: &str = "id, agent_id, tool, args, status, result, created_at, session_id";
 
 pub fn create_approval(
     conn: &Connection,
     agent_id: &str,
+    session_id: Option<&str>,
     tool: &str,
     args: &Value,
 ) -> Result<i64, String> {
     conn.execute(
-        "INSERT INTO approvals (agent_id, tool, args, status, created_at) VALUES (?1, ?2, ?3, 'pending', ?4)",
-        params![agent_id, tool, args.to_string(), now()],
+        "INSERT INTO approvals (agent_id, session_id, tool, args, status, created_at) VALUES (?1, ?2, ?3, ?4, 'pending', ?5)",
+        params![agent_id, session_id, tool, args.to_string(), now()],
     )
     .map_err(err)?;
     Ok(conn.last_insert_rowid())
@@ -840,6 +934,323 @@ pub fn pending_approval_count(conn: &Connection, agent_id: &str) -> Result<i64, 
         |row| row.get(0),
     )
     .map_err(err)
+}
+
+// ============================================================================
+// Tasks (background work, one session each)
+// ============================================================================
+
+/// Most tasks of one agent that run at the same time.
+pub const MAX_RUNNING_TASKS: i64 = 2;
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Task {
+    pub id: i64,
+    pub agent_id: String,
+    pub session_id: String,
+    pub title: String,
+    /// schedule | delegation | message | approval
+    pub kind: String,
+    /// running | waiting (on delegated work) | done | failed | cancelled
+    pub status: String,
+    pub summary: Option<String>,
+    pub last_event: Option<String>,
+    pub check_after: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub archived_at: Option<i64>,
+}
+
+const TASK_COLUMNS: &str = "id, agent_id, session_id, title, kind, status, summary, last_event, check_after, created_at, updated_at, archived_at";
+
+fn task_from_row(row: &rusqlite::Row) -> rusqlite::Result<Task> {
+    Ok(Task {
+        id: row.get(0)?,
+        agent_id: row.get(1)?,
+        session_id: row.get(2)?,
+        title: row.get(3)?,
+        kind: row.get(4)?,
+        status: row.get(5)?,
+        summary: row.get(6)?,
+        last_event: row.get(7)?,
+        check_after: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+        archived_at: row.get(11)?,
+    })
+}
+
+pub fn create_task(
+    conn: &Connection,
+    agent_id: &str,
+    session_id: &str,
+    title: &str,
+    kind: &str,
+) -> Result<Task, String> {
+    let ts = now();
+    conn.execute(
+        "INSERT INTO tasks (agent_id, session_id, title, kind, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?5)",
+        params![agent_id, session_id, title, kind, ts],
+    )
+    .map_err(err)?;
+    task_by_session(conn, session_id)?.ok_or_else(|| "Task was not created".to_string())
+}
+
+pub fn task_by_session(conn: &Connection, session_id: &str) -> Result<Option<Task>, String> {
+    conn.query_row(
+        &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE session_id=?1"),
+        [session_id],
+        task_from_row,
+    )
+    .optional()
+    .map_err(err)
+}
+
+/// The task got new input (follow-up update): it runs again.
+pub fn set_task_running(conn: &Connection, session_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET status='running', last_event=NULL, check_after=NULL, updated_at=?2 WHERE session_id=?1",
+        params![session_id, now()],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+/// A run of a task session ended: queue a check of its final state.
+pub fn mark_task_run_ended(
+    conn: &Connection,
+    session_id: &str,
+    event: &str,
+    check_after: i64,
+) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE tasks SET last_event=?2, check_after=?3 WHERE session_id=?1 AND archived_at IS NULL",
+        params![session_id, event, check_after],
+    )
+    .map_err(err)
+}
+
+pub fn due_task_checks(conn: &Connection, at: i64) -> Result<Vec<Task>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {TASK_COLUMNS} FROM tasks WHERE check_after IS NOT NULL AND check_after <= ?1"
+        ))
+        .map_err(err)?;
+    let rows = stmt.query_map([at], task_from_row).map_err(err)?;
+    rows.collect::<Result<_, _>>().map_err(err)
+}
+
+pub fn defer_task_check(
+    conn: &Connection,
+    id: i64,
+    check_after: Option<i64>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET check_after=?2 WHERE id=?1",
+        params![id, check_after],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+pub fn finish_task(conn: &Connection, id: i64, status: &str, summary: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET status=?2, summary=?3, check_after=NULL, updated_at=?4 WHERE id=?1",
+        params![id, status, summary, now()],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+pub fn running_task_count(conn: &Connection, agent_id: &str) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM tasks WHERE agent_id=?1 AND status='running' AND archived_at IS NULL",
+        [agent_id],
+        |row| row.get(0),
+    )
+    .map_err(err)
+}
+
+/// Delegations still open that a session started (a task waits on them).
+pub fn open_delegations_from(conn: &Connection, origin_session_id: &str) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM delegations WHERE origin_session_id=?1 AND status IN ('active', 'waiting')",
+        [origin_session_id],
+        |row| row.get(0),
+    )
+    .map_err(err)
+}
+
+pub fn list_tasks(conn: &Connection, agent_id: &str, limit: i64) -> Result<Vec<Task>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {TASK_COLUMNS} FROM tasks WHERE agent_id=?1 AND archived_at IS NULL
+             ORDER BY (status IN ('running', 'waiting')) DESC, updated_at DESC, id DESC LIMIT ?2"
+        ))
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![agent_id, limit], task_from_row)
+        .map_err(err)?;
+    rows.collect::<Result<_, _>>().map_err(err)
+}
+
+/// Finished tasks last changed before `before` (to archive their sessions).
+pub fn finished_tasks_before(conn: &Connection, before: i64) -> Result<Vec<Task>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {TASK_COLUMNS} FROM tasks
+             WHERE archived_at IS NULL AND status IN ('done', 'failed', 'cancelled') AND updated_at < ?1"
+        ))
+        .map_err(err)?;
+    let rows = stmt.query_map([before], task_from_row).map_err(err)?;
+    rows.collect::<Result<_, _>>().map_err(err)
+}
+
+pub fn mark_task_archived(conn: &Connection, id: i64) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET archived_at=?2, check_after=NULL WHERE id=?1",
+        params![id, now()],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+/// Archived tasks archived before `before` (to delete their sessions).
+pub fn archived_tasks_before(conn: &Connection, before: i64) -> Result<Vec<Task>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {TASK_COLUMNS} FROM tasks WHERE archived_at IS NOT NULL AND archived_at < ?1"
+        ))
+        .map_err(err)?;
+    let rows = stmt.query_map([before], task_from_row).map_err(err)?;
+    rows.collect::<Result<_, _>>().map_err(err)
+}
+
+pub fn delete_task(conn: &Connection, id: i64) -> Result<(), String> {
+    conn.execute("DELETE FROM tasks WHERE id=?1", [id])
+        .map_err(err)?;
+    Ok(())
+}
+
+// ============================================================================
+// Notifications (notify_user) and chat carry-over
+// ============================================================================
+
+pub const NOTIFICATION_LEVELS: &[&str] = &["info", "action", "error"];
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Notification {
+    pub id: i64,
+    pub agent_id: String,
+    pub session_id: Option<String>,
+    /// info | action (needs the user) | error
+    pub level: String,
+    pub message: String,
+    pub created_at: i64,
+    pub read_at: Option<i64>,
+}
+
+pub fn add_notification(
+    conn: &Connection,
+    agent_id: &str,
+    session_id: Option<&str>,
+    level: &str,
+    message: &str,
+) -> Result<Notification, String> {
+    if !NOTIFICATION_LEVELS.contains(&level) {
+        return Err(format!(
+            "level must be one of: {}",
+            NOTIFICATION_LEVELS.join(", ")
+        ));
+    }
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("Notification message cannot be empty".to_string());
+    }
+    let message: String = message.chars().take(2000).collect();
+    conn.execute(
+        "INSERT INTO notifications (agent_id, session_id, level, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![agent_id, session_id, level, message, now()],
+    )
+    .map_err(err)?;
+    let id = conn.last_insert_rowid();
+    conn.query_row(
+        "SELECT id, agent_id, session_id, level, message, created_at, read_at FROM notifications WHERE id=?1",
+        [id],
+        notification_from_row,
+    )
+    .map_err(err)
+}
+
+fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<Notification> {
+    Ok(Notification {
+        id: row.get(0)?,
+        agent_id: row.get(1)?,
+        session_id: row.get(2)?,
+        level: row.get(3)?,
+        message: row.get(4)?,
+        created_at: row.get(5)?,
+        read_at: row.get(6)?,
+    })
+}
+
+pub fn list_notifications(
+    conn: &Connection,
+    agent_id: &str,
+    limit: i64,
+) -> Result<Vec<Notification>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, agent_id, session_id, level, message, created_at, read_at FROM notifications
+             WHERE agent_id=?1 ORDER BY (read_at IS NULL) DESC, id DESC LIMIT ?2",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![agent_id, limit], notification_from_row)
+        .map_err(err)?;
+    rows.collect::<Result<_, _>>().map_err(err)
+}
+
+pub fn unread_notification_count(conn: &Connection, agent_id: &str) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM notifications WHERE agent_id=?1 AND read_at IS NULL",
+        [agent_id],
+        |row| row.get(0),
+    )
+    .map_err(err)
+}
+
+pub fn mark_notifications_read(conn: &Connection, agent_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE notifications SET read_at=?2 WHERE agent_id=?1 AND read_at IS NULL",
+        params![agent_id, now()],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+/// End of the agent's previous chat, added to the prompt of its new chat.
+pub fn set_carry_over(conn: &Connection, agent_id: &str, text: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE agents SET carry_over=?2 WHERE id=?1",
+        params![agent_id, text],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+pub fn get_carry_over(conn: &Connection, agent_id: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT carry_over FROM agents WHERE id=?1",
+        [agent_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(err)
+    .map(Option::flatten)
 }
 
 // ============================================================================
@@ -1146,7 +1557,7 @@ mod tests {
     #[test]
     fn delegation_check_cycle() {
         let conn = db();
-        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt1", 0).unwrap();
+        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt1", 0, None).unwrap();
         // Unrelated session: nothing marked
         assert_eq!(
             mark_delegation_run_ended(&conn, "other", "done", None, 10).unwrap(),
@@ -1172,7 +1583,7 @@ mod tests {
             mark_delegation_run_ended(&conn, "s1", "done", None, 20).unwrap(),
             0
         );
-        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt1", 1).unwrap();
+        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt1", 1, None).unwrap();
         assert_eq!(active_hop_for_session(&conn, "s1").unwrap(), 1);
         assert_eq!(
             list_delegations(&conn, JEAN_AGENT_ID, 10).unwrap()[0].status,
@@ -1183,8 +1594,8 @@ mod tests {
     #[test]
     fn requeue_only_touches_active_unqueued_delegations() {
         let conn = db();
-        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt", 0).unwrap();
-        upsert_delegation(&conn, JEAN_AGENT_ID, "s2", "wt", 0).unwrap();
+        upsert_delegation(&conn, JEAN_AGENT_ID, "s1", "wt", 0, None).unwrap();
+        upsert_delegation(&conn, JEAN_AGENT_ID, "s2", "wt", 0, None).unwrap();
         let d2 = list_delegations(&conn, JEAN_AGENT_ID, 10).unwrap();
         let s2 = d2.iter().find(|d| d.session_id == "s2").unwrap();
         finish_delegation(&conn, s2.id, "done", "").unwrap();
@@ -1194,7 +1605,21 @@ mod tests {
     #[test]
     fn events_and_wake_budget() {
         let conn = db();
-        let id = add_event(&conn, JEAN_AGENT_ID, "delegation", "hello", 0, None).unwrap();
+        let id = add_event(
+            &conn,
+            &NewEvent {
+                agent_id: JEAN_AGENT_ID,
+                kind: "delegation",
+                title: "Follow-up",
+                body: "hello",
+                target_session_id: Some("task-1"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let pending = pending_events(&conn, JEAN_AGENT_ID).unwrap();
+        assert_eq!(pending[0].target_session_id.as_deref(), Some("task-1"));
+        assert_eq!(pending[0].title.as_deref(), Some("Follow-up"));
         assert_eq!(
             agents_with_pending_events(&conn).unwrap(),
             vec![JEAN_AGENT_ID.to_string()]
@@ -1241,6 +1666,7 @@ mod tests {
         let id = create_approval(
             &conn,
             JEAN_AGENT_ID,
+            Some("task-1"),
             "delete_worktree",
             &serde_json::json!({"worktreeId": "w"}),
         )
@@ -1252,6 +1678,7 @@ mod tests {
         let a = get_approval(&conn, id).unwrap().unwrap();
         assert_eq!(a.status, "approved");
         assert_eq!(a.args["worktreeId"], "w");
+        assert_eq!(a.session_id.as_deref(), Some("task-1"));
         assert_eq!(pending_approval_count(&conn, JEAN_AGENT_ID).unwrap(), 0);
     }
 
@@ -1381,5 +1808,114 @@ mod tests {
         assert!(search_memories(&conn, &other.id, Some("new"), 10)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn task_worktree_ids_map_back_to_agents() {
+        assert_eq!(agent_tasks_worktree_id("jean"), "__agent_tasks_jean__");
+        assert_eq!(
+            agent_id_from_tasks_worktree("__agent_tasks_jean__"),
+            Some("jean")
+        );
+        assert_eq!(agent_id_from_tasks_worktree("__agent_tasks___"), None);
+        assert_eq!(agent_id_from_tasks_worktree("__agent_reviewer__"), None);
+        assert!(is_agent_worktree_id("__agent_tasks_release-manager__"));
+        // A chat worktree of an agent named "tasks-x" is not a task worktree
+        assert_eq!(
+            agent_id_from_tasks_worktree(&agent_worktree_id("tasks-x")),
+            None
+        );
+    }
+
+    #[test]
+    fn task_lifecycle_and_limits() {
+        let conn = db();
+        let t = create_task(&conn, JEAN_AGENT_ID, "task-1", "hello check", "schedule").unwrap();
+        assert_eq!(t.status, "running");
+        assert_eq!(running_task_count(&conn, JEAN_AGENT_ID).unwrap(), 1);
+        assert_eq!(mark_task_run_ended(&conn, "task-1", "done", 10).unwrap(), 1);
+        assert!(due_task_checks(&conn, 9).unwrap().is_empty());
+        assert_eq!(due_task_checks(&conn, 10).unwrap().len(), 1);
+        // A task that started work waits for it
+        upsert_delegation(&conn, JEAN_AGENT_ID, "worker", "wt", 0, Some("task-1")).unwrap();
+        assert_eq!(open_delegations_from(&conn, "task-1").unwrap(), 1);
+        finish_task(&conn, t.id, "waiting", "sent work").unwrap();
+        assert_eq!(running_task_count(&conn, JEAN_AGENT_ID).unwrap(), 0);
+        set_task_running(&conn, "task-1").unwrap();
+        finish_task(&conn, t.id, "done", "all good").unwrap();
+        assert_eq!(
+            list_tasks(&conn, JEAN_AGENT_ID, 10).unwrap()[0]
+                .summary
+                .as_deref(),
+            Some("all good")
+        );
+        // Archive and delete cycle
+        let old = finished_tasks_before(&conn, now() + 1).unwrap();
+        assert_eq!(old.len(), 1);
+        mark_task_archived(&conn, t.id).unwrap();
+        assert!(list_tasks(&conn, JEAN_AGENT_ID, 10).unwrap().is_empty());
+        assert_eq!(mark_task_run_ended(&conn, "task-1", "done", 10).unwrap(), 0);
+        assert_eq!(archived_tasks_before(&conn, now() + 1).unwrap().len(), 1);
+        delete_task(&conn, t.id).unwrap();
+        assert!(task_by_session(&conn, "task-1").unwrap().is_none());
+    }
+
+    #[test]
+    fn notifications_validate_and_mark_read() {
+        let conn = db();
+        assert!(add_notification(&conn, JEAN_AGENT_ID, None, "loud", "x").is_err());
+        assert!(add_notification(&conn, JEAN_AGENT_ID, None, "info", "  ").is_err());
+        let n = add_notification(
+            &conn,
+            JEAN_AGENT_ID,
+            Some("task-1"),
+            "action",
+            "Approve the deploy",
+        )
+        .unwrap();
+        assert_eq!(n.level, "action");
+        assert_eq!(unread_notification_count(&conn, JEAN_AGENT_ID).unwrap(), 1);
+        mark_notifications_read(&conn, JEAN_AGENT_ID).unwrap();
+        assert_eq!(unread_notification_count(&conn, JEAN_AGENT_ID).unwrap(), 0);
+        assert!(list_notifications(&conn, JEAN_AGENT_ID, 10).unwrap()[0]
+            .read_at
+            .is_some());
+    }
+
+    #[test]
+    fn carry_over_round_trip() {
+        let conn = db();
+        assert_eq!(get_carry_over(&conn, JEAN_AGENT_ID).unwrap(), None);
+        set_carry_over(&conn, JEAN_AGENT_ID, "User: hi").unwrap();
+        assert_eq!(
+            get_carry_over(&conn, JEAN_AGENT_ID).unwrap().as_deref(),
+            Some("User: hi")
+        );
+    }
+
+    #[test]
+    fn v1_database_with_data_upgrades_to_latest() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!("{} PRAGMA user_version = 1;", MIGRATIONS[0]))
+            .unwrap();
+        conn.execute(
+            "INSERT INTO agents (id, name, worktree_id, created_at, updated_at) VALUES ('jean', 'Jean', '__jean_agent__', 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO delegations (agent_id, session_id, worktree_id, status, created_at, updated_at) VALUES ('jean', 's1', 'wt', 'active', 1, 1)",
+            [],
+        )
+        .unwrap();
+        init(&conn).unwrap();
+        let d = &list_delegations(&conn, JEAN_AGENT_ID, 10).unwrap()[0];
+        assert_eq!(d.session_id, "s1");
+        assert_eq!(d.origin_session_id, None);
+        create_task(&conn, JEAN_AGENT_ID, "t1", "x", "schedule").unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
     }
 }

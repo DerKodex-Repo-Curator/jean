@@ -20,6 +20,35 @@ export interface AgentSummary {
   activeDelegations: number
   nextScheduleAt: number | null
   budgetReached: boolean
+  /** Worktree ID of the agent's background task sessions */
+  tasksWorktreeId: string
+  runningTasks: number
+  unreadNotifications: number
+}
+
+export interface AgentTask {
+  id: number
+  agentId: string
+  sessionId: string
+  title: string
+  /** schedule | delegation | message | approval */
+  kind: string
+  /** running | waiting | done | failed | cancelled */
+  status: string
+  summary: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AgentNotification {
+  id: number
+  agentId: string
+  sessionId: string | null
+  /** info | action | error */
+  level: string
+  message: string
+  createdAt: number
+  readAt: number | null
 }
 
 export interface AgentDelegation {
@@ -78,6 +107,8 @@ export interface AgentDetails {
   schedules: AgentSchedule[]
   approvals: AgentApproval[]
   memories: AgentMemory[]
+  tasks: AgentTask[]
+  notifications: AgentNotification[]
 }
 
 export interface AgentPatch {
@@ -199,6 +230,12 @@ export function useUpdateAgentMemory() {
 export function useDeleteAgentMemory() {
   return useAgentsMutation((args: { agentId: string; memoryId: number }) =>
     invoke<null>('delete_agent_memory', args)
+  )
+}
+
+export function useMarkAgentNotificationsRead() {
+  return useAgentsMutation((args: { agentId: string }) =>
+    invoke<null>('mark_agent_notifications_read', args)
   )
 }
 

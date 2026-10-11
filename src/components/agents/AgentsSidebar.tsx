@@ -11,7 +11,10 @@ import { NewAgentDialog } from './NewAgentDialog'
 
 /** Small dot that shows an agent needs attention or is working. */
 export function AgentStatusDot({ agent }: { agent: AgentSummary }) {
-  const needsYou = agent.pendingApprovals > 0 || agent.status === 'waiting'
+  const needsYou =
+    agent.pendingApprovals > 0 ||
+    agent.unreadNotifications > 0 ||
+    agent.status === 'waiting'
   if (agent.status === 'paused') {
     return (
       <span className="size-2 shrink-0 rounded-full bg-muted-foreground/50" />

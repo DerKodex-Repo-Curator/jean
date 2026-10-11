@@ -19,6 +19,10 @@ pub struct AgentSummary {
     pub active_delegations: i64,
     pub next_schedule_at: Option<i64>,
     pub budget_reached: bool,
+    /// Worktree ID of the agent's background task sessions.
+    pub tasks_worktree_id: String,
+    pub running_tasks: i64,
+    pub unread_notifications: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -28,6 +32,8 @@ pub struct AgentDetails {
     pub schedules: Vec<db::Schedule>,
     pub approvals: Vec<db::Approval>,
     pub memories: Vec<db::Memory>,
+    pub tasks: Vec<db::Task>,
+    pub notifications: Vec<db::Notification>,
 }
 
 pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
@@ -39,23 +45,33 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
             .ok()
             .map(|(s, _)| s);
         let since = db::now() - 3600;
-        let (pending_updates, pending_approvals, active_delegations, next_schedule_at, wakes) =
-            super::with_db(app, |conn| {
-                let active = db::list_delegations(conn, &agent.id, 200)?
-                    .iter()
-                    .filter(|d| d.status == "active")
-                    .count() as i64;
-                Ok((
-                    db::pending_event_count(conn, &agent.id)?,
-                    db::pending_approval_count(conn, &agent.id)?,
-                    active,
-                    db::next_schedule_at(conn, &agent.id)?,
-                    db::wakes_since(conn, &agent.id, since)?,
-                ))
-            })?;
-        let busy = home
-            .as_ref()
-            .is_some_and(|s| crate::chat::registry::is_session_actively_managed(&s.id));
+        let (
+            pending_updates,
+            pending_approvals,
+            active_delegations,
+            next_schedule_at,
+            wakes,
+            running_tasks,
+            unread_notifications,
+        ) = super::with_db(app, |conn| {
+            let active = db::list_delegations(conn, &agent.id, 200)?
+                .iter()
+                .filter(|d| d.status == "active")
+                .count() as i64;
+            Ok((
+                db::pending_event_count(conn, &agent.id)?,
+                db::pending_approval_count(conn, &agent.id)?,
+                active,
+                db::next_schedule_at(conn, &agent.id)?,
+                db::wakes_since(conn, &agent.id, since)?,
+                db::running_task_count(conn, &agent.id)?,
+                db::unread_notification_count(conn, &agent.id)?,
+            ))
+        })?;
+        let busy = running_tasks > 0
+            || home
+                .as_ref()
+                .is_some_and(|s| crate::chat::registry::is_session_actively_managed(&s.id));
         let waiting = home.as_ref().is_some_and(|s| s.waiting_for_input) || pending_approvals > 0;
         let status = if agent.paused {
             "paused"
@@ -74,6 +90,9 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
             active_delegations,
             next_schedule_at,
             budget_reached: wakes >= agent.max_wakes_per_hour,
+            tasks_worktree_id: db::agent_tasks_worktree_id(&agent.id),
+            running_tasks,
+            unread_notifications,
             agent,
         });
     }
@@ -88,8 +107,16 @@ pub fn get_agent_details(app: &AppHandle, agent_id: &str) -> Result<AgentDetails
             schedules: db::list_schedules(conn, agent_id)?,
             approvals: db::list_approvals(conn, agent_id, 30)?,
             memories: db::list_memories(conn, agent_id)?,
+            tasks: db::list_tasks(conn, agent_id, 50)?,
+            notifications: db::list_notifications(conn, agent_id, 30)?,
         })
     })
+}
+
+pub fn mark_notifications_read(app: &AppHandle, agent_id: &str) -> Result<(), String> {
+    super::with_db(app, |conn| db::mark_notifications_read(conn, agent_id))?;
+    super::notify_changed(app);
+    Ok(())
 }
 
 pub fn create_agent(

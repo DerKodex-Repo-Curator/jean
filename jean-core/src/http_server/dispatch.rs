@@ -4025,6 +4025,7 @@ const AGENT_COMMANDS: &[&str] = &[
     "update_agent_memory",
     "delete_agent_memory",
     "export_agent_memory",
+    "mark_agent_notifications_read",
 ];
 
 /// Agent commands (see `crate::agents::commands`).
@@ -4106,6 +4107,11 @@ async fn dispatch_agents_command(
                 let agent_id: String = field(args, "agentId", "agent_id")?;
                 let memory_id: i64 = field(args, "memoryId", "memory_id")?;
                 crate::agents::commands::delete_memory(app, &agent_id, memory_id)?;
+                Ok(Value::Null)
+            }
+            "mark_agent_notifications_read" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                crate::agents::commands::mark_notifications_read(app, &agent_id)?;
                 Ok(Value::Null)
             }
             "export_agent_memory" => {
