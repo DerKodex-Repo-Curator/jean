@@ -441,6 +441,28 @@ pub async fn install_remote_jean_server(
     .map_err(|error| format!("Remote install task failed: {error}"))?
 }
 
+/// List concrete host aliases from the local `~/.ssh/config`.
+#[tauri::command]
+pub async fn list_ssh_config_hosts() -> Result<Vec<crate::remote_install::SshConfigHost>, String> {
+    tokio::task::spawn_blocking(crate::remote_install::list_ssh_config_hosts)
+        .await
+        .map_err(|error| format!("SSH config task failed: {error}"))
+}
+
+/// Check SSH key access to a host. Returns `uname -sm` output.
+#[tauri::command]
+pub async fn test_ssh_connection(
+    user: String,
+    host: String,
+    ssh_port: Option<u16>,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::remote_install::test_ssh_connection(&user, &host, ssh_port)
+    })
+    .await
+    .map_err(|error| format!("SSH test task failed: {error}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::macos_terminal_ssh_args;

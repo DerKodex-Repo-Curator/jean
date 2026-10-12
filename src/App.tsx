@@ -105,6 +105,7 @@ import { peekWebReloadState, saveWebReloadState } from './lib/web-reload-state'
 import {
   clearConnectionSwitch,
   getActiveRemoteConnection,
+  getRemoteConnections,
   isConnectionSwitchPending,
 } from './lib/remote-connections'
 import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRecovery'
@@ -1103,6 +1104,7 @@ function App() {
       onboardingDismissed: onboarding.onboardingDismissed,
       onboardingManuallyTriggered: onboarding.onboardingManuallyTriggered,
       requiresWslChoice,
+      hasRemoteServer: getRemoteConnections().length > 0,
     })
 
     if (action === 'wait' || action === 'none') return

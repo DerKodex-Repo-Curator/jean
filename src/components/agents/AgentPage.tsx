@@ -26,6 +26,8 @@ import { agentStatusLabel, useSelectedAgent } from './agents'
 import { AgentActivity, PendingApprovals } from './AgentActivity'
 import { AgentMemoryView } from './AgentMemoryView'
 import { AgentTasks } from './AgentTasks'
+import { AgentSchedules } from './AgentSchedules'
+import { AgentInbox } from './AgentInbox'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -39,7 +41,7 @@ const LOADING = (
   </div>
 )
 
-type AgentTab = 'chat' | 'tasks' | 'activity' | 'memory'
+type AgentTab = 'chat' | 'inbox' | 'tasks' | 'schedules' | 'activity' | 'memory'
 
 function unavailableMessage(error: unknown): string {
   return String(error).includes('Unknown command')
@@ -112,12 +114,10 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     muted?: boolean
   }[] = [
     { id: 'chat', label: 'Chat' },
+    { id: 'inbox', label: 'Inbox', badge: agent.unreadNotifications },
     { id: 'tasks', label: 'Tasks', badge: agent.runningTasks, muted: true },
-    {
-      id: 'activity',
-      label: 'Activity',
-      badge: agent.pendingApprovals + agent.unreadNotifications,
-    },
+    { id: 'schedules', label: 'Schedules' },
+    { id: 'activity', label: 'Activity', badge: agent.pendingApprovals },
     { id: 'memory', label: 'Memory' },
   ]
 
@@ -230,6 +230,10 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               LOADING
             )}
           </>
+        ) : tab === 'inbox' ? (
+          <AgentInbox agent={agent} />
+        ) : tab === 'schedules' ? (
+          <AgentSchedules agent={agent} />
         ) : tab === 'tasks' ? (
           <AgentTasks agent={agent} workdir={workdir} />
         ) : tab === 'activity' ? (

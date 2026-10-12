@@ -419,6 +419,8 @@ pub fn run() {
             desktop_commands::start_http_server,
             desktop_commands::stop_http_server,
             desktop_commands::install_remote_jean_server,
+            desktop_commands::list_ssh_config_hosts,
+            desktop_commands::test_ssh_connection,
             browser::browser_create,
             browser::browser_navigate,
             browser::browser_back,

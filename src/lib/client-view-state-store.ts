@@ -44,6 +44,8 @@ export function captureClientViewState(): ClientViewState {
     file_browser_size: ui.fileBrowserSize,
     right_sidebar_visible: ui.rightSidebarVisible,
     zen_mode: ui.zenMode,
+    rail_section: ui.railSection,
+    selected_agent_id: ui.selectedAgentId,
     terminal_visible_by_worktree: terminal.terminalVisibleByWorktree,
     terminal_panel_open: terminal.terminalPanelOpen,
     terminal_visible: terminal.terminalVisible,
@@ -99,6 +101,8 @@ export function applyClientViewState(state: ClientViewState): void {
     fileBrowserSize: state.file_browser_size,
     rightSidebarVisible: state.right_sidebar_visible,
     zenMode: state.zen_mode,
+    railSection: state.rail_section,
+    selectedAgentId: state.selected_agent_id,
   })
   useTerminalStore.setState({
     terminalVisibleByWorktree: state.terminal_visible_by_worktree,

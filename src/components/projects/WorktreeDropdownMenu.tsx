@@ -154,7 +154,10 @@ export function WorktreeDropdownMenu({
   // On native desktop the auth query runs in App.tsx; on web/mobile access it doesn't.
   // Trigger it here on mobile so counts populate without depending on cache.
   useGhCliAuth({ enabled: isMobile })
-  const authData = queryClient.getQueryData<GhAuthStatus>(ghCliQueryKeys.auth())
+  const authData = queryClient.getQueryData<GhAuthStatus>([
+    ...ghCliQueryKeys.auth(),
+    'local',
+  ])
   const isGitHubAuthenticated = authData?.authenticated ?? false
   const { data: issueResult } = useGitHubIssues(projectPath, 'open', {
     enabled: !isServer && (isGitHubAuthenticated || projectId.includes(':')),

@@ -60,7 +60,12 @@ describe('client view state store bridge', () => {
       sidebarActiveTab: 'recent',
       pinnedRecentSessionIds: ['server:session'],
     })
-    useUIStore.setState({ rightSidebarVisible: true, zenMode: true })
+    useUIStore.setState({
+      rightSidebarVisible: true,
+      zenMode: true,
+      railSection: 'agents',
+      selectedAgentId: 'reviewer',
+    })
     useTerminalStore.setState({
       terminalVisibleByWorktree: { 'server:worktree': true },
     })
@@ -73,10 +78,18 @@ describe('client view state store bridge', () => {
       sidebarActiveTab: 'projects',
       pinnedRecentSessionIds: ['server:authoritative-session'],
     })
-    useUIStore.setState({ rightSidebarVisible: false, zenMode: false })
+    useUIStore.setState({
+      rightSidebarVisible: false,
+      zenMode: false,
+      railSection: 'workspace',
+      selectedAgentId: 'jean',
+    })
     useTerminalStore.setState({ terminalVisibleByWorktree: {} })
 
     applyClientViewState(captured)
+
+    expect(useUIStore.getState().railSection).toBe('agents')
+    expect(useUIStore.getState().selectedAgentId).toBe('reviewer')
 
     expect(useProjectsStore.getState().expandedProjectIds).toEqual(
       new Set(['server:project'])

@@ -3,6 +3,8 @@ import type { AgentApproval, AgentSummary } from '@/services/agents'
 import { agentStatusLabel, findAgent } from './agents'
 import { describeApproval, formatRelative } from './AgentActivity'
 import { taskStatusLabel } from './AgentTasks'
+import { formatInterval } from './AgentSchedules'
+import { splitNotifications } from './AgentInbox'
 
 function agent(overrides: Partial<AgentSummary>): AgentSummary {
   return {
@@ -106,5 +108,35 @@ describe('taskStatusLabel', () => {
   it('explains waiting tasks', () => {
     expect(taskStatusLabel('waiting')).toBe('waiting for sessions')
     expect(taskStatusLabel('done')).toBe('done')
+  })
+})
+
+describe('formatInterval', () => {
+  it('uses the largest whole unit', () => {
+    expect(formatInterval(30 * 60)).toBe('every 30m')
+    expect(formatInterval(2 * 3600)).toBe('every 2h')
+    expect(formatInterval(86_400)).toBe('every 1d')
+    expect(formatInterval(90 * 60)).toBe('every 90m')
+  })
+})
+
+describe('splitNotifications', () => {
+  it('keeps unread apart from read and keeps order', () => {
+    const n = (id: number, readAt: number | null) => ({
+      id,
+      agentId: 'jean',
+      sessionId: null,
+      level: 'info',
+      message: `m${id}`,
+      createdAt: id,
+      readAt,
+    })
+    const { unread, read } = splitNotifications([
+      n(3, null),
+      n(2, 5),
+      n(1, null),
+    ])
+    expect(unread.map(x => x.id)).toEqual([3, 1])
+    expect(read.map(x => x.id)).toEqual([2])
   })
 })
