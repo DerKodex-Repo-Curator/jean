@@ -11,6 +11,7 @@
 - Register ownership at adapter boundaries so path-only commands and remote assets route through the correct server.
 - Keep ownership visible in multi-source UI and test duplicate display names.
 - Return one ID form per server on every transport path (ID-routed, path-routed, explicit server). Mixed scoped/raw IDs make valid resources look missing.
+- Path routing matches only exact registered worktree/project paths. A file path inside a worktree does not route, so pass the owning `serverId` (`invokeForOptionalServer`).
 - Do not persist temporary session context under a broader worktree or project identity.
 
 ## Keep multi-server behavior at the correct boundary

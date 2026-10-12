@@ -35,6 +35,7 @@ import {
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { PlanDisplay } from './PlanFileDisplay'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { ThinkingBlock } from './ThinkingBlock'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
@@ -110,6 +111,7 @@ export const StreamingMessage = memo(function StreamingMessage({
   onCopySteeredText,
   hideEditedFiles = false,
 }: StreamingMessageProps) {
+  const ownerServerId = parseServerResourceKey(sessionId)?.serverId
   const displayBlocks = useMemo(
     () => restoreOmittedStreamingPrefix(streamingContent, contentBlocks),
     [streamingContent, contentBlocks]
@@ -494,7 +496,13 @@ export const StreamingMessage = memo(function StreamingMessage({
         )}
 
         {/* Show edited files during streaming */}
-        {!hideEditedFiles && <EditedFilesDisplay toolCalls={toolCalls} />}
+        {!hideEditedFiles && (
+          <EditedFilesDisplay
+            toolCalls={toolCalls}
+            worktreePath={worktreePath}
+            serverId={ownerServerId === 'local' ? undefined : ownerServerId}
+          />
+        )}
       </div>
     </MessageThreadContextMenu>
   )
