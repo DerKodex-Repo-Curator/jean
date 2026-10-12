@@ -19,6 +19,7 @@ import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import { cn } from '@/lib/utils'
 import { useCreateAgent } from '@/services/agents'
 import { AGENT_COLOR_CHOICES } from './agents'
+import { useAgentsEnabledServers } from './agents-feature'
 
 interface NewAgentDialogProps {
   open: boolean
@@ -36,7 +37,11 @@ export function NewAgentDialog({
   defaultServerId = LOCAL_SERVER_ID,
 }: NewAgentDialogProps) {
   const createAgent = useCreateAgent()
-  const servers = useSessionServerSources().filter(source => source.online)
+  // New agents can run on any online server that has Agents turned on
+  const enabledServers = useAgentsEnabledServers()
+  const servers = useSessionServerSources().filter(
+    source => source.online && enabledServers.includes(source.serverId)
+  )
   // null = follow the sidebar's server filter until the user picks one
   const [chosenServerId, setChosenServerId] = useState<string | null>(null)
   const serverId = chosenServerId ?? defaultServerId

@@ -1,6 +1,6 @@
 import { useAgentsList, type AgentSummary } from '@/services/agents'
 import { useUIStore } from '@/store/ui-store'
-import { useAgentsEnabled } from './agents-feature'
+import { useAgentsEnabledServers } from './agents-feature'
 
 /** Colors offered for new agents (`jean` is reserved for the boss). */
 export const AGENT_COLOR_CHOICES = [
@@ -27,8 +27,8 @@ export function useSelectedAgent(): {
   isLoading: boolean
   error: unknown
 } {
-  const enabled = useAgentsEnabled()
-  const { data: agents, isLoading, error } = useAgentsList(enabled)
+  const enabledServers = useAgentsEnabledServers()
+  const { data: agents, isLoading, error } = useAgentsList(enabledServers)
   const selectedAgentId = useUIStore(state => state.selectedAgentId)
   return {
     agent: findAgent(agents, selectedAgentId),

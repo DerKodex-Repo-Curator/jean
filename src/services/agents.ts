@@ -215,9 +215,14 @@ async function invokeAgent<T>(
   return ref ? decorateServerEvent(ref.serverId, result) : result
 }
 
-export function useAgentsList(enabled = true) {
+/** Agents of the servers that have Agents turned on (see
+ * `useAgentsEnabledServers`). */
+export function useAgentsList(enabledServerIds: string[]) {
   const native = isNativeApp()
-  const sources = useSessionServerSources()
+  const sources = useSessionServerSources().filter(source =>
+    enabledServerIds.includes(source.serverId)
+  )
+  const enabled = sources.length > 0
   const sourceKey = sources
     .map(source => `${source.serverId}:${source.online}`)
     .join('|')

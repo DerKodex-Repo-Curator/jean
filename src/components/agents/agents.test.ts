@@ -12,6 +12,7 @@ import { describeApproval, formatRelative } from './AgentActivity'
 import { taskStatusLabel } from './AgentTasks'
 import { formatInterval } from './AgentSchedules'
 import { splitNotifications } from './AgentInbox'
+import { enabledAgentServers } from './agents-feature'
 
 function agent(overrides: Partial<AgentSummary>): AgentSummary {
   return {
@@ -196,5 +197,21 @@ describe('multi-server agents', () => {
     expect(filterAgentsByServer(list, 'srv').map(a => a.id)).toEqual([
       'srv:jean',
     ])
+  })
+})
+
+describe('enabledAgentServers', () => {
+  it('shows agents when any server has them on', () => {
+    // Off on this computer, on for a remote server
+    expect(
+      enabledAgentServers(false, [
+        { serverId: 'srv', agentsEnabled: true },
+        { serverId: 'old', agentsEnabled: undefined },
+      ])
+    ).toEqual(['srv'])
+    expect(
+      enabledAgentServers(true, [{ serverId: 'srv', agentsEnabled: false }])
+    ).toEqual(['local'])
+    expect(enabledAgentServers(undefined, [])).toEqual([])
   })
 })
