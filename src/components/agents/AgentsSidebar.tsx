@@ -1,5 +1,13 @@
-import { useCallback, useState } from 'react'
-import { Plus, X } from '@/components/icons/reicon'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ChevronDown, Plus, Server, X } from '@/components/icons/reicon'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { isNativeApp } from '@/lib/environment'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -31,11 +39,60 @@ export function AgentStatusDot({ agent }: { agent: AgentSummary }) {
   return null
 }
 
+const ALL_SERVERS = 'all'
+
+/** Servers that have agents, in list order: [serverId, name]. */
+export function agentServers(agents: AgentSummary[]): [string, string][] {
+  const servers = new Map<string, string>()
+  for (const agent of agents) servers.set(agent.serverId, agent.serverName)
+  return [...servers]
+}
+
+/** Agents of one server, or of all servers. */
+export function filterAgentsByServer(
+  agents: AgentSummary[],
+  serverId: string
+): AgentSummary[] {
+  return serverId === ALL_SERVERS
+    ? agents
+    : agents.filter(agent => agent.serverId === serverId)
+}
+
 /** Agents sidebar panel: lists all agents like the projects list. */
 export function AgentsSidebar() {
   const isMobile = useIsMobile()
   const { agent: selected, agents, error } = useSelectedAgent()
   const [newAgentOpen, setNewAgentOpen] = useState(false)
+  const serverFilter = useUIStore(state => state.agentsServerFilter)
+  const servers = useMemo(() => agentServers(agents ?? []), [agents])
+  // Native app with remote servers: filter and group agents by server
+  const showServerFilter = isNativeApp() && servers.length > 1
+  const visibleAgents = showServerFilter
+    ? filterAgentsByServer(agents ?? [], serverFilter)
+    : (agents ?? [])
+  const groups: [string, string, AgentSummary[]][] =
+    showServerFilter && serverFilter === ALL_SERVERS
+      ? servers.map(([id, name]) => [
+          id,
+          name,
+          visibleAgents.filter(agent => agent.serverId === id),
+        ])
+      : [['', '', visibleAgents]]
+  const selectedServerLabel =
+    serverFilter === ALL_SERVERS
+      ? 'All servers'
+      : (servers.find(([id]) => id === serverFilter)?.[1] ?? 'All servers')
+
+  // The filtered server has no agents anymore (removed or offline)
+  useEffect(() => {
+    if (
+      agents &&
+      serverFilter !== ALL_SERVERS &&
+      !servers.some(([id]) => id === serverFilter)
+    ) {
+      useUIStore.getState().setAgentsServerFilter(ALL_SERVERS)
+    }
+  }, [agents, servers, serverFilter])
 
   const handleSelect = useCallback(
     (agentId: string) => {
@@ -73,47 +130,107 @@ export function AgentsSidebar() {
             <Plus className="size-4" />
           </button>
         </div>
+        {showServerFilter && (
+          <div className="shrink-0 px-2 pb-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Filter agents by server"
+                  className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <Server className="size-3.5" />
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    {selectedServerLabel}
+                  </span>
+                  <ChevronDown className="size-3.5 opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuRadioGroup
+                  value={serverFilter}
+                  onValueChange={value =>
+                    useUIStore.getState().setAgentsServerFilter(value)
+                  }
+                >
+                  <DropdownMenuRadioItem
+                    value={ALL_SERVERS}
+                    className="text-xs"
+                  >
+                    All servers
+                  </DropdownMenuRadioItem>
+                  {servers.map(([id, name]) => (
+                    <DropdownMenuRadioItem
+                      key={id}
+                      value={id}
+                      className="text-xs"
+                    >
+                      {name}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
         {error ? (
           <p className="px-3 text-xs text-destructive">
             Agents are unavailable: {String(error)}
           </p>
         ) : null}
-        <ul
+        <div
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
           aria-label="Agents"
         >
-          {agents?.map(agent => {
-            const isSelected = agent.id === selected?.id
-            return (
-              <li key={agent.id}>
-                <button
-                  type="button"
-                  aria-current={isSelected ? 'page' : undefined}
-                  title={agentStatusLabel(agent)}
-                  className={cn(
-                    'relative flex w-full items-center gap-1.5 overflow-hidden px-2 py-1.5 text-left transition-colors duration-150',
-                    isSelected
-                      ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
-                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                  )}
-                  onClick={() => handleSelect(agent.id)}
-                  data-testid={`agent-row-${agent.id}`}
-                >
-                  <AgentIcon icon={agent.icon} className="size-4 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {agent.name}
-                  </span>
-                  <AgentStatusDot agent={agent} />
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+          {groups.map(([groupId, groupName, groupAgents]) => (
+            <section key={groupId || 'agents'}>
+              {groupName && (
+                <h3 className="px-3 pb-1 pt-2 text-xs text-muted-foreground">
+                  {groupName}
+                </h3>
+              )}
+              <ul>
+                {groupAgents.map(agent => {
+                  const isSelected = agent.id === selected?.id
+                  return (
+                    <li key={agent.id}>
+                      <button
+                        type="button"
+                        aria-current={isSelected ? 'page' : undefined}
+                        title={agentStatusLabel(agent)}
+                        className={cn(
+                          'relative flex w-full items-center gap-1.5 overflow-hidden px-2 py-1.5 text-left transition-colors duration-150',
+                          isSelected
+                            ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
+                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                        )}
+                        onClick={() => handleSelect(agent.id)}
+                        data-testid={`agent-row-${agent.id}`}
+                      >
+                        <AgentIcon
+                          icon={agent.icon}
+                          className="size-4 shrink-0"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm">
+                          {agent.name}
+                        </span>
+                        <AgentStatusDot agent={agent} />
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
       </div>
       <NewAgentDialog
         open={newAgentOpen}
         onOpenChange={setNewAgentOpen}
         onCreated={handleSelect}
+        defaultServerId={
+          serverFilter === ALL_SERVERS ? undefined : serverFilter
+        }
       />
     </div>
   )

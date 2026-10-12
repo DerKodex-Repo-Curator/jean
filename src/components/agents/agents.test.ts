@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentApproval, AgentSummary } from '@/services/agents'
+import {
+  agentServerId,
+  loadAgentsForServers,
+  scopeAgentSummary,
+  type AgentApproval,
+  type AgentSummary,
+} from '@/services/agents'
+import { agentServers, filterAgentsByServer } from './AgentsSidebar'
 import { agentStatusLabel, findAgent } from './agents'
 import { describeApproval, formatRelative } from './AgentActivity'
 import { taskStatusLabel } from './AgentTasks'
@@ -9,6 +16,8 @@ import { splitNotifications } from './AgentInbox'
 function agent(overrides: Partial<AgentSummary>): AgentSummary {
   return {
     id: 'jean',
+    serverId: 'local',
+    serverName: 'Local',
     name: 'Jean',
     description: '',
     icon: 'jean',
@@ -138,5 +147,54 @@ describe('splitNotifications', () => {
     ])
     expect(unread.map(x => x.id)).toEqual([3, 1])
     expect(read.map(x => x.id)).toEqual([2])
+  })
+})
+
+describe('multi-server agents', () => {
+  it('scopes remote agent IDs so commands and chats route to that server', () => {
+    const raw = agent({ id: 'reviewer', homeSessionId: 's1' })
+    const local = scopeAgentSummary('local', 'Local', raw)
+    expect(local.id).toBe('reviewer')
+    expect(local.worktreeId).toBe('__jean_agent__')
+    const remote = scopeAgentSummary('srv', 'Home server', raw)
+    expect(remote.id).toBe('srv:reviewer')
+    expect(remote.worktreeId).toBe('srv:__jean_agent__')
+    expect(remote.tasksWorktreeId).toBe('srv:__agent_tasks_jean__')
+    expect(remote.homeSessionId).toBe('srv:s1')
+    expect(remote.serverName).toBe('Home server')
+    expect(agentServerId(remote.id)).toBe('srv')
+    expect(agentServerId(local.id)).toBe('local')
+  })
+
+  it('loads agents from online servers and skips failing ones', async () => {
+    const agents = await loadAgentsForServers(
+      [
+        { serverId: 'local', name: 'Local', online: true },
+        { serverId: 'srv', name: 'Remote', online: true },
+        { serverId: 'old', name: 'Old Jean', online: true },
+        { serverId: 'off', name: 'Offline', online: false },
+      ],
+      async serverId => {
+        if (serverId === 'old') throw new Error('Unknown command: list_agents')
+        if (serverId === 'off') throw new Error('must not be called')
+        return [agent({})]
+      }
+    )
+    expect(agents.map(a => a.id)).toEqual(['jean', 'srv:jean'])
+  })
+
+  it('lists servers once and filters by server', () => {
+    const list = [
+      { ...agent({}), serverId: 'local', serverName: 'Local' },
+      { ...agent({ id: 'srv:jean' }), serverId: 'srv', serverName: 'Remote' },
+    ]
+    expect(agentServers(list)).toEqual([
+      ['local', 'Local'],
+      ['srv', 'Remote'],
+    ])
+    expect(filterAgentsByServer(list, 'all')).toHaveLength(2)
+    expect(filterAgentsByServer(list, 'srv').map(a => a.id)).toEqual([
+      'srv:jean',
+    ])
   })
 })

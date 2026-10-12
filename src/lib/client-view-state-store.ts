@@ -46,6 +46,7 @@ export function captureClientViewState(): ClientViewState {
     zen_mode: ui.zenMode,
     rail_section: ui.railSection,
     selected_agent_id: ui.selectedAgentId,
+    agents_server_filter: ui.agentsServerFilter,
     terminal_visible_by_worktree: terminal.terminalVisibleByWorktree,
     terminal_panel_open: terminal.terminalPanelOpen,
     terminal_visible: terminal.terminalVisible,
@@ -103,6 +104,7 @@ export function applyClientViewState(state: ClientViewState): void {
     zenMode: state.zen_mode,
     railSection: state.rail_section,
     selectedAgentId: state.selected_agent_id,
+    agentsServerFilter: state.agents_server_filter,
   })
   useTerminalStore.setState({
     terminalVisibleByWorktree: state.terminal_visible_by_worktree,

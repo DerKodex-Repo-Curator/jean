@@ -65,6 +65,7 @@ describe('client view state store bridge', () => {
       zenMode: true,
       railSection: 'agents',
       selectedAgentId: 'reviewer',
+      agentsServerFilter: 'server',
     })
     useTerminalStore.setState({
       terminalVisibleByWorktree: { 'server:worktree': true },
@@ -83,6 +84,7 @@ describe('client view state store bridge', () => {
       zenMode: false,
       railSection: 'workspace',
       selectedAgentId: 'jean',
+      agentsServerFilter: 'all',
     })
     useTerminalStore.setState({ terminalVisibleByWorktree: {} })
 
@@ -90,6 +92,7 @@ describe('client view state store bridge', () => {
 
     expect(useUIStore.getState().railSection).toBe('agents')
     expect(useUIStore.getState().selectedAgentId).toBe('reviewer')
+    expect(useUIStore.getState().agentsServerFilter).toBe('server')
 
     expect(useProjectsStore.getState().expandedProjectIds).toEqual(
       new Set(['server:project'])

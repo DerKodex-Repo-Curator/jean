@@ -30,6 +30,8 @@ export interface ClientViewState {
   rail_section: 'workspace' | 'agents'
   /** Agent open on the Agents page */
   selected_agent_id: string
+  /** Agents sidebar server filter: 'all' or a server ID */
+  agents_server_filter: string
   terminal_visible_by_worktree: Record<string, boolean>
   terminal_panel_open: Record<string, boolean>
   terminal_visible: boolean
@@ -68,6 +70,7 @@ export const defaultClientViewState: ClientViewState = {
   zen_mode: false,
   rail_section: 'workspace',
   selected_agent_id: 'jean',
+  agents_server_filter: 'all',
   terminal_visible_by_worktree: {},
   terminal_panel_open: {},
   terminal_visible: false,
@@ -241,6 +244,8 @@ function parseClientViewState(value: unknown): ClientViewState {
     assign('rail_section', value.rail_section)
   if (isString(value.selected_agent_id) && value.selected_agent_id)
     assign('selected_agent_id', value.selected_agent_id)
+  if (isString(value.agents_server_filter) && value.agents_server_filter)
+    assign('agents_server_filter', value.agents_server_filter)
   if (isDockMode(value.modal_terminal_dock_mode))
     assign('modal_terminal_dock_mode', value.modal_terminal_dock_mode)
   if (isDockMode(value.browser_modal_dock_mode))

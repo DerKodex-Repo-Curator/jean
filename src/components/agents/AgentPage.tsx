@@ -22,6 +22,7 @@ import {
 } from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { agentStatusLabel, useSelectedAgent } from './agents'
 import { AgentActivity, PendingApprovals } from './AgentActivity'
 import { AgentMemoryView } from './AgentMemoryView'
@@ -140,6 +141,11 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
             </span>
           </h1>
           <p className="truncate text-xs text-muted-foreground">
+            {agent.serverId !== LOCAL_SERVER_ID && (
+              <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5">
+                on {agent.serverName}
+              </span>
+            )}
             {agent.description}
           </p>
         </div>

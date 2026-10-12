@@ -26,6 +26,9 @@ const ROUTED_ARGUMENT_KEYS = new Set([
   'parent_id',
   'activeSessionId',
   'active_session_id',
+  // Agents: each Jean server has its own agents
+  'agentId',
+  'agent_id',
 ])
 
 const PATH_ARGUMENT_KEYS = new Set([

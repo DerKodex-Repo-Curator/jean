@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { useWorktree } from '@/services/projects'
 import {
   useAgentDetails,
@@ -54,7 +55,7 @@ function ApprovalRow({ approval }: { approval: AgentApproval }) {
   )
   const run = (approve: boolean) =>
     decide.mutate(
-      { approvalId: approval.id, approve },
+      { agentId: approval.agentId, approvalId: approval.id, approve },
       {
         onSuccess: result =>
           result.status === 'failed'
@@ -142,7 +143,11 @@ const STATUS_STYLES: Record<string, string> = {
 }
 
 function DelegationRow({ delegation }: { delegation: AgentDelegation }) {
-  const isAgentSession = delegation.worktreeId.startsWith('__')
+  // Agent sessions use reserved IDs (also when scoped to a remote server)
+  const isAgentSession = (
+    parseServerResourceKey(delegation.worktreeId)?.resourceId ??
+    delegation.worktreeId
+  ).startsWith('__')
   const { data: worktree } = useWorktree(
     isAgentSession ? null : delegation.worktreeId
   )

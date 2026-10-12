@@ -1,10 +1,26 @@
+import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { isNativeApp } from '@/lib/environment'
+import { decorateServerEvent } from '@/lib/server-command-routing'
+import {
+  parseServerResourceKey,
+  serverResourceKey,
+} from '@/lib/server-resource'
+import { invoke, invokeForServer } from '@/lib/transport'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import {
+  useSessionServerSources,
+  type SessionServerSource,
+} from './multi-server-sessions'
 
 export type AgentStatus = 'idle' | 'working' | 'waiting' | 'paused'
 
 export interface AgentSummary {
+  /** Agent key: raw ID on the local server, `serverId:id` on a remote one */
   id: string
+  /** Jean server that runs this agent */
+  serverId: string
+  serverName: string
   name: string
   description: string
   icon: string
@@ -129,20 +145,110 @@ export const agentsQueryKeys = {
     [...agentsQueryKeys.all, 'workdir', agentId] as const,
 }
 
+type RawAgentSummary = Omit<AgentSummary, 'serverId' | 'serverName'>
+
+/** Tag an agent with its server; remote IDs become server-scoped keys so
+ * commands and chat sessions route to that server. */
+export function scopeAgentSummary(
+  serverId: string,
+  serverName: string,
+  agent: RawAgentSummary
+): AgentSummary {
+  if (serverId === LOCAL_SERVER_ID) return { ...agent, serverId, serverName }
+  const scope = (resourceId: string) =>
+    serverResourceKey({ serverId, resourceId })
+  return {
+    ...agent,
+    id: scope(agent.id),
+    worktreeId: scope(agent.worktreeId),
+    tasksWorktreeId: scope(agent.tasksWorktreeId),
+    homeSessionId: agent.homeSessionId ? scope(agent.homeSessionId) : null,
+    serverId,
+    serverName,
+  }
+}
+
+/** Agents of every online server. Servers without agents support (older
+ * Jean) or with errors are skipped. */
+export async function loadAgentsForServers(
+  sources: SessionServerSource[],
+  invokeServer: (
+    serverId: string,
+    command: string
+  ) => Promise<RawAgentSummary[]>
+): Promise<AgentSummary[]> {
+  const results = await Promise.allSettled(
+    sources
+      .filter(source => source.online)
+      .map(async source => ({
+        source,
+        agents: await invokeServer(source.serverId, 'list_agents'),
+      }))
+  )
+  return results.flatMap(result =>
+    result.status === 'fulfilled'
+      ? result.value.agents.map(agent =>
+          scopeAgentSummary(
+            result.value.source.serverId,
+            result.value.source.name,
+            agent
+          )
+        )
+      : []
+  )
+}
+
+/** Server of an agent key. */
+export function agentServerId(agentKey: string): string {
+  return parseServerResourceKey(agentKey)?.serverId ?? LOCAL_SERVER_ID
+}
+
+/** Run an agent command on the agent's server (routed by `agentId`).
+ * IDs in a remote server's result are scoped like the agent key. */
+async function invokeAgent<T>(
+  agentKey: string,
+  command: string,
+  args: Record<string, unknown> = {}
+): Promise<T> {
+  const result = await invoke<T>(command, { ...args, agentId: agentKey })
+  const ref = parseServerResourceKey(agentKey)
+  return ref ? decorateServerEvent(ref.serverId, result) : result
+}
+
 export function useAgentsList(enabled = true) {
-  return useQuery({
+  const native = isNativeApp()
+  const sources = useSessionServerSources()
+  const sourceKey = sources
+    .map(source => `${source.serverId}:${source.online}`)
+    .join('|')
+  const query = useQuery({
     queryKey: agentsQueryKeys.list(),
-    queryFn: () => invoke<AgentSummary[]>('list_agents'),
+    queryFn: () =>
+      native
+        ? loadAgentsForServers(sources, (serverId, command) =>
+            invokeForServer<RawAgentSummary[]>(serverId, command)
+          )
+        : invoke<RawAgentSummary[]>('list_agents').then(agents =>
+            agents.map(agent =>
+              scopeAgentSummary(LOCAL_SERVER_ID, 'This server', agent)
+            )
+          ),
     enabled,
     staleTime: 10_000,
   })
+  // A server came online or went away: load its agents.
+  const { refetch } = query
+  useEffect(() => {
+    if (enabled) void refetch()
+  }, [sourceKey, enabled, refetch])
+  return query
 }
 
 export function useAgentDetails(agentId: string | null) {
   return useQuery({
     queryKey: agentsQueryKeys.details(agentId ?? ''),
     queryFn: () =>
-      invoke<AgentDetails>('get_agent_details', { agentId: agentId ?? '' }),
+      invokeAgent<AgentDetails>(agentId ?? '', 'get_agent_details'),
     enabled: !!agentId,
     staleTime: 10_000,
   })
@@ -151,8 +257,7 @@ export function useAgentDetails(agentId: string | null) {
 export function useAgentWorkdir(agentId: string | null) {
   return useQuery({
     queryKey: agentsQueryKeys.workdir(agentId ?? ''),
-    queryFn: () =>
-      invoke<string>('get_agent_workdir', { agentId: agentId ?? '' }),
+    queryFn: () => invokeAgent<string>(agentId ?? '', 'get_agent_workdir'),
     enabled: !!agentId,
     staleTime: Infinity,
   })
@@ -172,12 +277,28 @@ function useAgentsMutation<TArgs, TResult>(
 
 export function useCreateAgent() {
   return useAgentsMutation(
-    (args: {
+    async ({
+      serverId,
+      ...args
+    }: {
+      /** Jean server that runs the new agent */
+      serverId: string
       name: string
       description: string
       icon: string
       rolePrompt: string
-    }) => invoke<AgentSummary>('create_agent', args)
+    }): Promise<{ key: string; name: string }> => {
+      const agent = await invokeForServer<{ id: string; name: string }>(
+        serverId,
+        'create_agent',
+        args
+      )
+      const key =
+        serverId === LOCAL_SERVER_ID
+          ? agent.id
+          : serverResourceKey({ serverId, resourceId: agent.id })
+      return { key, name: agent.name }
+    }
   )
 }
 
@@ -194,8 +315,16 @@ export function useDeleteAgent() {
 }
 
 export function useDecideAgentApproval() {
-  return useAgentsMutation((args: { approvalId: number; approve: boolean }) =>
-    invoke<AgentApproval>('decide_agent_approval', args)
+  return useAgentsMutation(
+    ({
+      agentId,
+      ...args
+    }: {
+      /** Routes the decision to the agent's server */
+      agentId: string
+      approvalId: number
+      approve: boolean
+    }) => invokeAgent<AgentApproval>(agentId, 'decide_agent_approval', args)
   )
 }
 

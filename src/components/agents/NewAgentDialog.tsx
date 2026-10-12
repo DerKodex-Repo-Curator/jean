@@ -12,6 +12,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { useSessionServerSources } from '@/services/multi-server-sessions'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import { cn } from '@/lib/utils'
 import { useCreateAgent } from '@/services/agents'
@@ -21,6 +24,8 @@ interface NewAgentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: (agentId: string) => void
+  /** Server selected in the sidebar filter; new agents run there */
+  defaultServerId?: string
 }
 
 /** Create an agent: name, color, short description and role prompt. */
@@ -28,8 +33,17 @@ export function NewAgentDialog({
   open,
   onOpenChange,
   onCreated,
+  defaultServerId = LOCAL_SERVER_ID,
 }: NewAgentDialogProps) {
   const createAgent = useCreateAgent()
+  const servers = useSessionServerSources().filter(source => source.online)
+  // null = follow the sidebar's server filter until the user picks one
+  const [chosenServerId, setChosenServerId] = useState<string | null>(null)
+  const serverId = chosenServerId ?? defaultServerId
+  // The server is offline (or "all servers"): use the first online one
+  const targetServerId = servers.some(s => s.serverId === serverId)
+    ? serverId
+    : (servers[0]?.serverId ?? LOCAL_SERVER_ID)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [rolePrompt, setRolePrompt] = useState('')
@@ -40,15 +54,16 @@ export function NewAgentDialog({
     setDescription('')
     setRolePrompt('')
     setIcon(AGENT_COLOR_CHOICES[0])
+    setChosenServerId(null)
   }
 
   const handleCreate = () => {
     createAgent.mutate(
-      { name, description, icon, rolePrompt },
+      { serverId: targetServerId, name, description, icon, rolePrompt },
       {
         onSuccess: agent => {
           toast.success(`Agent ${agent.name} created`)
-          onCreated(agent.id)
+          onCreated(agent.key)
           onOpenChange(false)
           reset()
         },
@@ -68,6 +83,28 @@ export function NewAgentDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          {servers.length > 1 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-server">Server</Label>
+              <NativeSelect
+                id="agent-server"
+                value={targetServerId}
+                onChange={e => setChosenServerId(e.target.value)}
+              >
+                {servers.map(server => (
+                  <NativeSelectOption
+                    key={server.serverId}
+                    value={server.serverId}
+                  >
+                    {server.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <p className="text-xs text-muted-foreground">
+                The agent runs on this Jean server and manages its projects.
+              </p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="agent-name">Name</Label>
             <Input
