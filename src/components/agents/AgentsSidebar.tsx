@@ -14,28 +14,17 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import type { AgentSummary } from '@/services/agents'
-import { agentStatusLabel, useSelectedAgent } from './agents'
+import { agentStatusLabel, agentSubtitle, useSelectedAgent } from './agents'
 import { NewAgentDialog } from './NewAgentDialog'
 
-/** Small dot that shows an agent needs attention or is working. */
-export function AgentStatusDot({ agent }: { agent: AgentSummary }) {
-  const needsYou =
-    agent.pendingApprovals > 0 ||
-    agent.unreadNotifications > 0 ||
-    agent.status === 'waiting'
-  if (agent.status === 'paused') {
-    return (
-      <span className="size-2 shrink-0 rounded-full bg-muted-foreground/50" />
-    )
-  }
-  if (needsYou) {
-    return <span className="size-2 shrink-0 rounded-full bg-amber-500" />
-  }
-  if (agent.status === 'working') {
-    return (
-      <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" />
-    )
-  }
+/** Dot after the row: blue = unread messages, amber = needs you. */
+export function agentRowDot(
+  agent: AgentSummary
+): 'unread' | 'attention' | null {
+  if (agent.status === 'paused') return null
+  if (agent.pendingApprovals > 0 || agent.status === 'waiting')
+    return 'attention'
+  if (agent.unreadNotifications > 0) return 'unread'
   return null
 }
 
@@ -185,13 +174,14 @@ export function AgentsSidebar() {
           {groups.map(([groupId, groupName, groupAgents]) => (
             <section key={groupId || 'agents'}>
               {groupName && (
-                <h3 className="px-3 pb-1 pt-2 text-xs text-muted-foreground">
+                <h3 className="px-4 pb-1.5 pt-3 text-xs text-muted-foreground">
                   {groupName}
                 </h3>
               )}
-              <ul>
+              <ul className="space-y-0.5 px-2">
                 {groupAgents.map(agent => {
                   const isSelected = agent.id === selected?.id
+                  const dot = agentRowDot(agent)
                   return (
                     <li key={agent.id}>
                       <button
@@ -199,22 +189,48 @@ export function AgentsSidebar() {
                         aria-current={isSelected ? 'page' : undefined}
                         title={agentStatusLabel(agent)}
                         className={cn(
-                          'relative flex w-full items-center gap-1.5 overflow-hidden px-2 py-1.5 text-left transition-colors duration-150',
+                          'flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150',
                           isSelected
-                            ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
-                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                            ? 'bg-accent text-foreground'
+                            : 'hover:bg-accent/50'
                         )}
                         onClick={() => handleSelect(agent.id)}
                         data-testid={`agent-row-${agent.id}`}
                       >
-                        <AgentIcon
-                          icon={agent.icon}
-                          className="size-4 shrink-0"
-                        />
-                        <span className="min-w-0 flex-1 truncate text-sm">
-                          {agent.name}
+                        <span className="relative shrink-0">
+                          <AgentIcon
+                            icon={agent.icon}
+                            className={cn(
+                              'size-9',
+                              agent.status === 'paused' && 'opacity-50'
+                            )}
+                          />
+                          {agent.status === 'working' && (
+                            <span
+                              className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-green-500 ring-2 ring-sidebar dark:ring-[#0b0b0b]"
+                              aria-label="Working"
+                            />
+                          )}
                         </span>
-                        <AgentStatusDot agent={agent} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-foreground">
+                            {agent.name}
+                          </span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {agentSubtitle(agent)}
+                          </span>
+                        </span>
+                        {dot && (
+                          <span
+                            className={cn(
+                              'size-2 shrink-0 rounded-full',
+                              dot === 'unread' ? 'bg-blue-500' : 'bg-amber-500'
+                            )}
+                            aria-label={
+                              dot === 'unread' ? 'Unread messages' : 'Needs you'
+                            }
+                          />
+                        )}
                       </button>
                     </li>
                   )

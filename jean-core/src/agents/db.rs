@@ -1223,6 +1223,29 @@ pub fn unread_notification_count(conn: &Connection, agent_id: &str) -> Result<i6
     .map_err(err)
 }
 
+/// Newest notification and newest task result of an agent, with times
+/// (for the sidebar's "what is going on" line).
+pub fn latest_activity(conn: &Connection, agent_id: &str) -> Result<Vec<(i64, String)>, String> {
+    let notification: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT created_at, message FROM notifications WHERE agent_id=?1 ORDER BY id DESC LIMIT 1",
+            [agent_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(err)?;
+    let task: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT updated_at, COALESCE(NULLIF(summary, ''), title) FROM tasks
+             WHERE agent_id=?1 ORDER BY updated_at DESC, id DESC LIMIT 1",
+            [agent_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(err)?;
+    Ok(notification.into_iter().chain(task).collect())
+}
+
 pub fn mark_notifications_read(conn: &Connection, agent_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE notifications SET read_at=?2 WHERE agent_id=?1 AND read_at IS NULL",

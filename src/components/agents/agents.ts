@@ -38,6 +38,15 @@ export function useSelectedAgent(): {
   }
 }
 
+/** Second line of an agent row: what needs the user, else the latest
+ * activity, else the description. */
+export function agentSubtitle(agent: AgentSummary): string {
+  if (agent.status === 'paused') return 'Stopped'
+  if (agent.pendingApprovals > 0) return 'Needs your approval'
+  if (agent.status === 'waiting') return 'Waiting for your answer'
+  return agent.activity ?? (agent.description || 'No activity yet')
+}
+
 /** Short status text for an agent row and header. */
 export function agentStatusLabel(agent: AgentSummary): string {
   if (agent.status === 'paused') return 'Paused'

@@ -23,6 +23,22 @@ pub struct AgentSummary {
     pub tasks_worktree_id: String,
     pub running_tasks: i64,
     pub unread_notifications: i64,
+    /// One line about the latest activity: chat reply, notification, or task result
+    pub activity: Option<String>,
+}
+
+/// One short line from a message: the first non-empty line without Markdown
+/// marks, at most 120 characters.
+pub(crate) fn activity_preview(text: &str) -> Option<String> {
+    let line = text
+        .lines()
+        .map(|line| line.trim().trim_start_matches(['#', '-', '*', '>', ' ']))
+        .find(|line| !line.trim().is_empty())?;
+    let clean: String = line
+        .chars()
+        .filter(|c| !matches!(c, '*' | '`' | '_'))
+        .collect();
+    Some(super::engine::truncate(clean.trim(), 120))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,10 +56,31 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
     let agents = super::with_db(app, db::list_agents)?;
     let mut out = Vec::with_capacity(agents.len());
     for agent in agents {
-        let home = super::engine::home_session(app, &agent)
+        let home_with_path = super::engine::home_session(app, &agent).await.ok();
+        // Last reply in the chat (with its time) for the activity line
+        let chat_reply = match &home_with_path {
+            Some((session, path)) => crate::chat::get_session(
+                app.clone(),
+                agent.worktree_id.clone(),
+                path.clone(),
+                session.id.clone(),
+                Some(2),
+            )
             .await
             .ok()
-            .map(|(s, _)| s);
+            .and_then(|s| {
+                s.messages
+                    .iter()
+                    .rev()
+                    .find(|m| {
+                        m.role == crate::chat::types::MessageRole::Assistant
+                            && !m.content.trim().is_empty()
+                    })
+                    .map(|m| (m.timestamp as i64, m.content.clone()))
+            }),
+            None => None,
+        };
+        let home = home_with_path.map(|(s, _)| s);
         let since = db::now() - 3600;
         let (
             pending_updates,
@@ -73,6 +110,11 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
                 .as_ref()
                 .is_some_and(|s| crate::chat::registry::is_session_actively_managed(&s.id));
         let waiting = home.as_ref().is_some_and(|s| s.waiting_for_input) || pending_approvals > 0;
+        let activity = super::with_db(app, |conn| db::latest_activity(conn, &agent.id))?
+            .into_iter()
+            .chain(chat_reply)
+            .max_by_key(|(at, _)| *at)
+            .and_then(|(_, text)| activity_preview(&text));
         let status = if agent.paused {
             "paused"
         } else if busy {
@@ -93,6 +135,7 @@ pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
             tasks_worktree_id: db::agent_tasks_worktree_id(&agent.id),
             running_tasks,
             unread_notifications,
+            activity,
             agent,
         });
     }
@@ -275,6 +318,23 @@ pub(crate) fn render_memory_markdown(agent_id: &str, memories: &[db::Memory]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_preview_takes_first_clean_line() {
+        assert_eq!(
+            activity_preview("\n## Recap\nmore").as_deref(),
+            Some("Recap")
+        );
+        assert_eq!(
+            activity_preview("**Done**: pushed `main`").as_deref(),
+            Some("Done: pushed main")
+        );
+        assert_eq!(activity_preview("   \n  "), None);
+        assert_eq!(
+            activity_preview(&"x".repeat(200)).unwrap().chars().count(),
+            121
+        );
+    }
 
     #[test]
     fn memory_markdown_groups_by_kind() {

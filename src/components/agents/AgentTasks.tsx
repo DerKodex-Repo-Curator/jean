@@ -1,5 +1,11 @@
 import { Suspense, lazy, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import {
   useAgentDetails,
@@ -46,28 +52,19 @@ function TaskRow({
     <li>
       <button
         type="button"
-        className="flex w-full items-start gap-3 rounded-md border px-3 py-2 text-left transition-colors hover:bg-accent/50"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50"
         onClick={() => onOpen(task)}
       >
-        <div className="min-w-0 flex-1">
-          <p className="flex items-baseline gap-2 text-sm">
-            <span className="truncate text-foreground">{task.title}</span>
-            <span
-              className={cn('shrink-0 text-xs', STATUS_STYLES[task.status])}
-            >
-              {taskStatusLabel(task.status)}
-            </span>
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {KIND_LABELS[task.kind] ?? task.kind} ·{' '}
-            {formatRelative(task.updatedAt)}
-          </p>
-          {task.summary ? (
-            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-              {task.summary}
-            </p>
-          ) : null}
-        </div>
+        <span className="min-w-0 flex-1 truncate text-foreground">
+          {task.title}
+        </span>
+        <span className={cn('shrink-0 text-xs', STATUS_STYLES[task.status])}>
+          {taskStatusLabel(task.status)}
+        </span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {KIND_LABELS[task.kind] ?? task.kind} ·{' '}
+          {formatRelative(task.updatedAt)}
+        </span>
       </button>
     </li>
   )
@@ -91,37 +88,6 @@ export function AgentTasks({
     setOpenTask(task)
   }
 
-  if (openTask && workdir) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-          <Button size="sm" variant="ghost" onClick={() => setOpenTask(null)}>
-            ← Back to tasks
-          </Button>
-          <span className="truncate text-sm text-foreground">
-            {openTask.title}
-          </span>
-        </div>
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          <Suspense
-            fallback={
-              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                Loading task…
-              </div>
-            }
-          >
-            <ChatWindow
-              key={openTask.sessionId}
-              isModal
-              worktreeId={agent.tasksWorktreeId}
-              worktreePath={workdir}
-            />
-          </Suspense>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-4">
       <p className="text-xs text-muted-foreground">
@@ -131,7 +97,7 @@ export function AgentTasks({
       {isLoading ? (
         <p className="text-xs text-muted-foreground">Loading tasks…</p>
       ) : data?.tasks.length ? (
-        <ul className="space-y-2">
+        <ul className="space-y-0.5">
           {data.tasks.map(task => (
             <TaskRow key={task.id} task={task} onOpen={handleOpen} />
           ))}
@@ -139,6 +105,52 @@ export function AgentTasks({
       ) : (
         <p className="text-xs text-muted-foreground">No open tasks.</p>
       )}
+      <Dialog
+        open={openTask !== null && workdir !== undefined}
+        onOpenChange={open => !open && setOpenTask(null)}
+      >
+        <DialogContent className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none !p-0 sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[90vw] sm:!max-w-[90vw] sm:!h-[90dvh] sm:!max-h-[90dvh] sm:!rounded-lg flex flex-col gap-0 overflow-hidden">
+          {openTask && workdir && (
+            <>
+              <DialogHeader className="shrink-0 space-y-1 border-b px-4 py-3 pr-12 text-left">
+                <DialogTitle className="truncate text-base">
+                  {openTask.title}
+                </DialogTitle>
+                <DialogDescription className="flex flex-wrap items-center gap-x-2 text-xs">
+                  <span className={STATUS_STYLES[openTask.status]}>
+                    {taskStatusLabel(openTask.status)}
+                  </span>
+                  <span>
+                    {KIND_LABELS[openTask.kind] ?? openTask.kind} · updated{' '}
+                    {formatRelative(openTask.updatedAt)}
+                  </span>
+                </DialogDescription>
+                {openTask.summary ? (
+                  <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                    {openTask.summary}
+                  </p>
+                ) : null}
+              </DialogHeader>
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                <Suspense
+                  fallback={
+                    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                      Loading task…
+                    </div>
+                  }
+                >
+                  <ChatWindow
+                    key={openTask.sessionId}
+                    isModal
+                    worktreeId={agent.tasksWorktreeId}
+                    worktreePath={workdir}
+                  />
+                </Suspense>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

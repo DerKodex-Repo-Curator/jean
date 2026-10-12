@@ -275,6 +275,10 @@ export function decorateServerResult<T>(
   ) {
     return decorateSession(serverId, value) as T
   }
+  // These return the next active session id (or null) as a bare string.
+  if (command === 'close_session' || command === 'archive_session') {
+    return scopedId(serverId, value) as T
+  }
   if (
     command === 'start_background_investigation' &&
     value &&

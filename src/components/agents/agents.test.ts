@@ -6,12 +6,16 @@ import {
   type AgentApproval,
   type AgentSummary,
 } from '@/services/agents'
-import { agentServers, filterAgentsByServer } from './AgentsSidebar'
-import { agentStatusLabel, findAgent } from './agents'
+import {
+  agentRowDot,
+  agentServers,
+  filterAgentsByServer,
+} from './AgentsSidebar'
+import { agentStatusLabel, agentSubtitle, findAgent } from './agents'
 import { describeApproval, formatRelative } from './AgentActivity'
 import { taskStatusLabel } from './AgentTasks'
 import { formatInterval } from './AgentSchedules'
-import { splitNotifications } from './AgentInbox'
+import { notificationPreview, splitNotifications } from './AgentInbox'
 import { enabledAgentServers } from './agents-feature'
 
 function agent(overrides: Partial<AgentSummary>): AgentSummary {
@@ -37,6 +41,7 @@ function agent(overrides: Partial<AgentSummary>): AgentSummary {
     tasksWorktreeId: '__agent_tasks_jean__',
     runningTasks: 0,
     unreadNotifications: 0,
+    activity: null,
     ...overrides,
   }
 }
@@ -213,5 +218,43 @@ describe('enabledAgentServers', () => {
       enabledAgentServers(true, [{ serverId: 'srv', agentsEnabled: false }])
     ).toEqual(['local'])
     expect(enabledAgentServers(undefined, [])).toEqual([])
+  })
+})
+
+describe('agent rows', () => {
+  it('shows what needs the user first, then the latest activity', () => {
+    expect(agentSubtitle(agent({ status: 'paused', activity: 'x' }))).toBe(
+      'Stopped'
+    )
+    expect(agentSubtitle(agent({ pendingApprovals: 1 }))).toBe(
+      'Needs your approval'
+    )
+    expect(agentSubtitle(agent({ activity: 'Pushed the fix' }))).toBe(
+      'Pushed the fix'
+    )
+    expect(agentSubtitle(agent({ description: 'Coordinates' }))).toBe(
+      'Coordinates'
+    )
+    expect(agentSubtitle(agent({}))).toBe('No activity yet')
+  })
+
+  it('marks unread messages and things that need the user', () => {
+    expect(agentRowDot(agent({ unreadNotifications: 2 }))).toBe('unread')
+    expect(
+      agentRowDot(agent({ unreadNotifications: 2, pendingApprovals: 1 }))
+    ).toBe('attention')
+    expect(agentRowDot(agent({ status: 'paused', pendingApprovals: 1 }))).toBe(
+      null
+    )
+    expect(agentRowDot(agent({}))).toBe(null)
+  })
+})
+
+describe('notificationPreview', () => {
+  it('uses the first non-empty line', () => {
+    expect(notificationPreview('\n  Disk check: ok  \n\n| a | b |')).toBe(
+      'Disk check: ok'
+    )
+    expect(notificationPreview('   ')).toBe('')
   })
 })

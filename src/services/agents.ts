@@ -40,6 +40,8 @@ export interface AgentSummary {
   tasksWorktreeId: string
   runningTasks: number
   unreadNotifications: number
+  /** One line about the latest activity (chat reply, notification, task) */
+  activity: string | null
 }
 
 export interface AgentTask {
