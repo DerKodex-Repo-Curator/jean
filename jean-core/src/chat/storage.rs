@@ -790,11 +790,20 @@ pub fn load_sessions(
         } else {
             // No metadata found - create minimal session from index entry
             // Use resolved backend from preferences instead of hardcoded Claude
+            let backend = super::commands::resolve_default_backend(app, Some(worktree_id));
+            let execution_mode = super::commands::default_execution_policy(
+                app,
+                worktree_id,
+                &backend,
+                crate::load_preferences_sync(app)
+                    .ok()
+                    .map(|prefs| prefs.default_execution_mode),
+            );
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            Session {
+            let mut session = Session {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
                 order: entry.order,
@@ -803,7 +812,7 @@ pub fn load_sessions(
                 last_message_at: None,
                 messages: vec![],
                 message_count: Some(entry.message_count),
-                backend: super::commands::resolve_default_backend(app, Some(worktree_id)),
+                backend,
                 claude_session_id: None,
                 codex_thread_id: None,
                 codex_goal: None,
@@ -819,7 +828,7 @@ pub fn load_sessions(
                 selected_effort_level: None,
                 selected_provider: None,
                 selected_execution_mode: None,
-                selected_permission_mode: None,
+                selected_permission_mode: Some("yolo".to_string()),
                 session_naming_completed: false,
                 archived_at: entry.archived_at,
                 archived_by_base_close: None,
@@ -859,7 +868,10 @@ pub fn load_sessions(
                 total_runs: 0,
                 loaded_run_start_index: 0,
                 scheduled_wakeup: None,
-            }
+            };
+            // Persist an explicit policy: a missing field reloads as legacy Plan.
+            session.set_execution_policy(Some(execution_mode));
+            session
         };
         sessions.push(session);
     }
@@ -899,11 +911,20 @@ where
         } else {
             // No metadata found - create minimal session from index entry
             // Use resolved backend from preferences instead of hardcoded Claude
+            let backend = super::commands::resolve_default_backend(app, Some(worktree_id));
+            let execution_mode = super::commands::default_execution_policy(
+                app,
+                worktree_id,
+                &backend,
+                crate::load_preferences_sync(app)
+                    .ok()
+                    .map(|prefs| prefs.default_execution_mode),
+            );
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            Session {
+            let mut session = Session {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
                 order: entry.order,
@@ -912,7 +933,7 @@ where
                 last_message_at: None,
                 messages: vec![],
                 message_count: Some(entry.message_count),
-                backend: super::commands::resolve_default_backend(app, Some(worktree_id)),
+                backend,
                 claude_session_id: None,
                 codex_thread_id: None,
                 codex_goal: None,
@@ -928,7 +949,7 @@ where
                 selected_effort_level: None,
                 selected_provider: None,
                 selected_execution_mode: None,
-                selected_permission_mode: None,
+                selected_permission_mode: Some("yolo".to_string()),
                 session_naming_completed: false,
                 archived_at: entry.archived_at,
                 archived_by_base_close: None,
@@ -968,7 +989,10 @@ where
                 total_runs: 0,
                 loaded_run_start_index: 0,
                 scheduled_wakeup: None,
-            }
+            };
+            // Persist an explicit policy: a missing field reloads as legacy Plan.
+            session.set_execution_policy(Some(execution_mode));
+            session
         };
         hydrated_sessions.push(session);
     }

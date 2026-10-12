@@ -424,6 +424,23 @@ fn default_execution_mode_for_worktree(
     }
 }
 
+/// Workflow policy for a new session: worktree/preference default, or Plan when
+/// the backend does not support that default.
+pub(crate) fn default_execution_policy(
+    app: &AppHandle,
+    worktree_id: &str,
+    backend: &Backend,
+    preferences_default: Option<String>,
+) -> String {
+    let policy = default_execution_mode_for_worktree(app, worktree_id, preferences_default)
+        .unwrap_or_else(|| "yolo".to_string());
+    if validate_execution_policy(&policy, backend).is_ok() {
+        policy
+    } else {
+        "plan".to_string()
+    }
+}
+
 /// Global system prompt for a session: server projects use the server prompt instead.
 fn resolve_session_global_system_prompt(
     app: &AppHandle,
@@ -1120,19 +1137,14 @@ pub async fn create_session(
             sessions.sessions.len() as u32,
             backend_enum.clone(),
         );
-        let default_policy = default_execution_mode_for_worktree(
+        let policy = default_execution_policy(
             &app,
             &worktree_id,
+            &backend_enum,
             preferences
                 .as_ref()
                 .map(|prefs| prefs.default_execution_mode.clone()),
-        )
-        .unwrap_or_else(|| "yolo".to_string());
-        let policy = if validate_execution_policy(&default_policy, &backend_enum).is_ok() {
-            default_policy
-        } else {
-            "plan".to_string()
-        };
+        );
         session.set_execution_policy(Some(policy));
         if session.selected_permission_mode.is_none() {
             session.selected_permission_mode = Some("yolo".to_string());
