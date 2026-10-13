@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo } from 'react'
-import { Activity, Loader2 } from '@/components/icons/reicon'
+import { Activity } from '@/components/icons/reicon'
+import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { toast } from 'sonner'
 import { Markdown } from '@/components/ui/markdown'
 import type {
@@ -50,7 +51,7 @@ function WorkingVisualRow() {
         <span className="font-medium shrink-0 flex-none whitespace-nowrap">
           Working…
         </span>
-        <Loader2 className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-foreground" />
+        <WorkingWaveform className="ml-auto" />
       </div>
     </div>
   )
