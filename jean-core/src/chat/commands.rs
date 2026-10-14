@@ -445,10 +445,14 @@ pub(crate) fn default_execution_policy(
 fn resolve_session_global_system_prompt(
     app: &AppHandle,
     worktree_id: &str,
-    preferences_prompt: Option<&str>,
+    preferences: Option<&crate::AppPreferences>,
 ) -> String {
-    crate::projects::server_system_prompt(app, worktree_id)
-        .unwrap_or_else(|| resolve_global_system_prompt(preferences_prompt))
+    let prompt = crate::projects::server_system_prompt(app, worktree_id).unwrap_or_else(|| {
+        resolve_global_system_prompt(
+            preferences.and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+        )
+    });
+    crate::apply_agent_browser_preference(prompt, preferences)
 }
 
 /// Resolve the model used for a send.
@@ -520,9 +524,7 @@ fn build_kimi_system_prompt(
     parts.push(resolve_session_global_system_prompt(
         app,
         worktree_id,
-        preferences
-            .as_ref()
-            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+        preferences.as_ref(),
     ));
     if let Some(prompt) = parallel_prompt
         .map(str::trim)
@@ -3983,22 +3985,26 @@ pub async fn send_chat_message(
                     }
 
                     // Global system prompt from preferences (with default fallback)
-                    let preferences_global_prompt = crate::get_preferences_path(&thread_app)
+                    let preferences = crate::get_preferences_path(&thread_app)
                         .ok()
                         .and_then(|prefs_path| std::fs::read_to_string(&prefs_path).ok())
                         .and_then(|contents| {
                             serde_json::from_str::<crate::AppPreferences>(&contents).ok()
-                        })
-                        .and_then(|prefs| prefs.magic_prompts.global_system_prompt);
-                    system_prompt_parts.push(
+                        });
+                    let global_prompt =
                         crate::projects::server_system_prompt(&thread_app, &thread_worktree_id)
                             .unwrap_or_else(|| {
                                 resolve_codex_global_system_prompt(
-                                    preferences_global_prompt.as_deref(),
+                                    preferences.as_ref().and_then(|prefs| {
+                                        prefs.magic_prompts.global_system_prompt.as_deref()
+                                    }),
                                     thread_execution_mode.as_deref(),
                                 )
-                            }),
-                    );
+                            });
+                    system_prompt_parts.push(crate::apply_agent_browser_preference(
+                        global_prompt,
+                        preferences.as_ref(),
+                    ));
 
                     // Parallel execution prompt
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -4386,9 +4392,7 @@ pub async fn send_chat_message(
                     system_prompt_parts.push(resolve_session_global_system_prompt(
                         &thread_app,
                         &thread_worktree_id,
-                        preferences
-                            .as_ref()
-                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                        preferences.as_ref(),
                     ));
 
                     // Parallel execution prompt
@@ -4720,9 +4724,7 @@ pub async fn send_chat_message(
                     parts.push(resolve_session_global_system_prompt(
                         &thread_app,
                         &thread_worktree_id,
-                        preferences
-                            .as_ref()
-                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                        preferences.as_ref(),
                     ));
 
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -4889,9 +4891,7 @@ pub async fn send_chat_message(
                     parts.push(resolve_session_global_system_prompt(
                         &thread_app,
                         &thread_worktree_id,
-                        preferences
-                            .as_ref()
-                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                        preferences.as_ref(),
                     ));
 
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -5023,9 +5023,7 @@ pub async fn send_chat_message(
                     parts.push(resolve_session_global_system_prompt(
                         &thread_app,
                         &thread_worktree_id,
-                        preferences
-                            .as_ref()
-                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                        preferences.as_ref(),
                     ));
 
                     if let Some(prompt) = &thread_parallel_prompt {

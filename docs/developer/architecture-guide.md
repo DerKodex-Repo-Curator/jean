@@ -246,22 +246,28 @@ Additional systems (no dedicated docs yet):
   on startup and after managed installs or upgrades. A real system `PATH`
   installation always takes precedence.
 
-- **Required agent integrations** - Jean MCP and Agent Browser are mandatory
-  runtime services. Startup always enables the Jean MCP socket, repairs the
-  supported CLI config entries, and installs Agent Browser plus Chrome for
-  Testing when they are missing. These repairs run in the background so the UI
-  and HTTP server do not wait for a first-run browser download. Legacy
-  `jean_mcp_enabled: false` values are migrated to `true`, and Agent Browser is
-  always included in effective MCP server selection. The Settings controls can
-  report status and retry a failed repair, but cannot disable either service.
+- **Agent integrations** - Jean MCP is a mandatory runtime service. Startup
+  always enables the Jean MCP socket and repairs the supported CLI config
+  entries. Legacy `jean_mcp_enabled: false` values are migrated to `true`.
+  Agent Browser is opt-in through `agent_browser_enabled` (default `false`,
+  Settings → MCP Servers → Agent Browser). When it is on, startup installs
+  Agent Browser plus Chrome for Testing when they are missing and repairs its
+  MCP entries. When it is off, startup removes the Jean-written
+  `agent-browser` MCP entries from the CLI configs. Jean identifies its own
+  entries by `AGENT_BROWSER_RESTORE = "jean"` and keeps user-added entries.
+  When it is off, `apply_agent_browser_preference()` also removes every
+  global system prompt line that mentions Agent Browser before Jean sends it
+  to any backend.
+  These repairs run in the background so the UI and HTTP server do not wait
+  for a first-run browser download.
   Agent Browser installation follows the official `npm install agent-browser`
   and `agent-browser install` flow:
   https://github.com/vercel-labs/agent-browser#installation
   Jean uses `agent-browser@latest` for its managed npm prefix. Do not remove
   the explicit tag: npm otherwise keeps the existing caret range, and a range
   such as `^0.37.1` does not accept `0.38.1` for a pre-1.0 package.
-  After startup settles, the client checks the npm registry for the latest
-  Agent Browser version. When a newer version exists, Jean shows a persistent
+  When Agent Browser is on and startup settles, the client checks the npm
+  registry for the latest Agent Browser version. When a newer version exists, Jean shows a persistent
   notification with **Update** and **Later** actions. Jean does not update the
   browser until the user selects **Update**.
 

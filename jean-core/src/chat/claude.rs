@@ -927,7 +927,8 @@ fn build_claude_args(
                             .unwrap_or(DEFAULT_GLOBAL_SYSTEM_PROMPT)
                             .to_string()
                     });
-                system_prompt_parts.push(prompt);
+                system_prompt_parts
+                    .push(crate::apply_agent_browser_preference(prompt, Some(&prefs)));
             }
         }
     }

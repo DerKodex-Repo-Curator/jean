@@ -566,6 +566,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -720,6 +721,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -854,6 +856,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithDeprecatedFastModel)
 
@@ -979,6 +982,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -1106,6 +1110,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -1275,6 +1280,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -1400,6 +1406,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {

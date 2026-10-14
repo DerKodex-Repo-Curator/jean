@@ -76,7 +76,10 @@ fn build_system_prompt_parts(
                 })
                 .unwrap_or_else(crate::default_global_system_prompt)
         });
-    parts.push(global_prompt);
+    parts.push(crate::apply_agent_browser_preference(
+        global_prompt,
+        prefs.as_ref(),
+    ));
 
     let parallel_prompt = prefs
         .as_ref()

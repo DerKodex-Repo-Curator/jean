@@ -2999,6 +2999,11 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["mcp", "agent-browser", "preferences"]);
             to_value(result)
         }
+        "remove_agent_browser_mcp" => {
+            let result = crate::agent_browser::remove_agent_browser_mcp().await?;
+            emit_cache_invalidation(app, &["mcp", "agent-browser"]);
+            to_value(result)
+        }
         "start_opencode_server" => {
             let result = crate::opencode_server::start_opencode_server(app.clone()).await?;
             to_value(result)

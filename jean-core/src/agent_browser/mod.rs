@@ -368,7 +368,7 @@ pub async fn get_agent_browser_status(app: AppHandle) -> Result<AgentBrowserStat
         managed_install: resolved.managed,
         claude_snippet: entry.claude_snippet(),
         codex_snippet: entry.codex_snippet(),
-        install_hint: "Jean installs Agent Browser automatically. Manual fallback: npm install -g agent-browser@latest && agent-browser install".to_string(),
+        install_hint: "Turn on Agent Browser in Settings to install it. Manual fallback: npm install -g agent-browser@latest && agent-browser install".to_string(),
     })
 }
 
@@ -544,9 +544,20 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
         managed_install: true,
         claude_snippet: entry.claude_snippet(),
         codex_snippet: entry.codex_snippet(),
-        install_hint: "Jean installs Agent Browser automatically. Manual fallback: npm install -g agent-browser@latest && agent-browser install".to_string(),
+        install_hint: "Turn on Agent Browser in Settings to install it. Manual fallback: npm install -g agent-browser@latest && agent-browser install".to_string(),
     })
 }
+
+/// CLI backends whose config files hold an agent-browser MCP entry.
+const CONFIG_BACKENDS: [&str; 7] = [
+    "claude",
+    "codex",
+    "opencode",
+    "cursor",
+    "grok",
+    "kimi",
+    "antigravity",
+];
 
 /// Install `agent-browser` MCP server into selected CLI backends.
 ///
@@ -558,17 +569,8 @@ pub async fn install_agent_browser_mcp(
     backends: Option<Vec<String>>,
 ) -> Result<Vec<AgentBrowserInstallResult>, String> {
     let entry = build_entry(&app);
-    let backends = backends.unwrap_or_else(|| {
-        vec![
-            "claude".to_string(),
-            "codex".to_string(),
-            "opencode".to_string(),
-            "cursor".to_string(),
-            "grok".to_string(),
-            "kimi".to_string(),
-            "antigravity".to_string(),
-        ]
-    });
+    let backends =
+        backends.unwrap_or_else(|| CONFIG_BACKENDS.iter().map(|b| b.to_string()).collect());
 
     let mut results = Vec::with_capacity(backends.len());
     for backend in backends {
@@ -608,6 +610,138 @@ pub async fn install_agent_browser_mcp(
     }
 
     Ok(results)
+}
+
+/// Remove the Jean-written `agent-browser` MCP entry from every CLI backend
+/// config. Entries without Jean's restore key were added by the user and are
+/// kept.
+pub async fn remove_agent_browser_mcp() -> Result<Vec<AgentBrowserInstallResult>, String> {
+    tauri::async_runtime::spawn_blocking(remove_agent_browser_mcp_sync)
+        .await
+        .map_err(|e| format!("agent-browser MCP removal task failed: {e}"))
+}
+
+pub(crate) fn remove_agent_browser_mcp_sync() -> Vec<AgentBrowserInstallResult> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    CONFIG_BACKENDS
+        .iter()
+        .filter_map(|backend| {
+            let result = match *backend {
+                "claude" => remove_json_server(&home.join(".claude.json"), "mcpServers", "env"),
+                "cursor" => {
+                    remove_json_server(&home.join(".cursor").join("mcp.json"), "mcpServers", "env")
+                }
+                "kimi" => remove_json_server(
+                    &home.join(".kimi-code").join("mcp.json"),
+                    "mcpServers",
+                    "env",
+                ),
+                "antigravity" => remove_json_server(
+                    &home.join(".gemini").join("config").join("mcp_config.json"),
+                    "mcpServers",
+                    "env",
+                ),
+                "opencode" => match find_opencode_config_path(&home) {
+                    Some(path) => remove_json_server(&path, "mcp", "environment"),
+                    None => Ok(None),
+                },
+                "codex" => remove_toml_server(&home.join(".codex").join("config.toml")),
+                "grok" => remove_toml_server(&home.join(".grok").join("config.toml")),
+                _ => Ok(None),
+            };
+            let (status, path, backup_path, message) = match result {
+                Ok(None) => return None,
+                Ok(Some((path, backup))) => (
+                    "removed",
+                    Some(path.to_string_lossy().to_string()),
+                    backup.map(|p| p.to_string_lossy().to_string()),
+                    format!("Removed {MCP_SERVER_NAME}"),
+                ),
+                Err(error) => ("error", None, None, error),
+            };
+            Some(AgentBrowserInstallResult {
+                backend: backend.to_string(),
+                status: status.to_string(),
+                path,
+                backup_path,
+                server_name: MCP_SERVER_NAME.to_string(),
+                message,
+            })
+        })
+        .collect()
+}
+
+/// Whether an MCP entry env map holds Jean's restore key.
+fn is_jean_env(env: Option<&Value>) -> bool {
+    env.and_then(|env| env.get(RESTORE_ENV))
+        .and_then(Value::as_str)
+        == Some(RESTORE_KEY)
+}
+
+/// Returns `Ok(None)` when the file has no Jean-written entry.
+fn remove_json_server(
+    path: &Path,
+    container_key: &str,
+    env_key: &str,
+) -> Result<Option<(PathBuf, Option<PathBuf>)>, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Failed to read {}: {e}", path.display())),
+    };
+    if content.trim().is_empty() {
+        return Ok(None);
+    }
+    let mut root: Value = serde_json::from_str(&strip_jsonc_comments_simple(&content))
+        .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
+    let Some(container) = root.get_mut(container_key).and_then(Value::as_object_mut) else {
+        return Ok(None);
+    };
+    if !container
+        .get(MCP_SERVER_NAME)
+        .is_some_and(|server| is_jean_env(server.get(env_key)))
+    {
+        return Ok(None);
+    }
+    container.remove(MCP_SERVER_NAME);
+
+    let updated = serde_json::to_string_pretty(&root)
+        .map_err(|e| format!("Failed to serialize {}: {e}", path.display()))?;
+    let backup = write_atomic_with_backup(path, &updated)?;
+    Ok(Some((path.to_path_buf(), backup)))
+}
+
+/// Returns `Ok(None)` when the file has no Jean-written entry.
+fn remove_toml_server(path: &Path) -> Result<Option<(PathBuf, Option<PathBuf>)>, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Failed to read {}: {e}", path.display())),
+    };
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
+    let is_jean = doc
+        .get("mcp_servers")
+        .and_then(|servers| servers.get(MCP_SERVER_NAME))
+        .and_then(|server| server.get("env"))
+        .and_then(|env| env.get(RESTORE_ENV))
+        .and_then(|value| value.as_str())
+        == Some(RESTORE_KEY);
+    if !is_jean {
+        return Ok(None);
+    }
+    if let Some(servers) = doc
+        .get_mut("mcp_servers")
+        .and_then(|item| item.as_table_like_mut())
+    {
+        servers.remove(MCP_SERVER_NAME);
+    }
+
+    let backup = write_atomic_with_backup(path, &doc.to_string())?;
+    Ok(Some((path.to_path_buf(), backup)))
 }
 
 fn enable_in_preferences(
@@ -1042,6 +1176,59 @@ mod tests {
         assert!(content.contains("[mcp_servers.agent-browser]"));
         assert!(content.contains("/usr/bin/agent-browser"));
         assert!(content.contains("AGENT_BROWSER_RESTORE"));
+    }
+
+    #[test]
+    fn remove_json_server_removes_only_jean_entry() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("mcp.json");
+        fs::write(
+            &path,
+            r#"{ "mcpServers": { "other": { "command": "x" } } }"#,
+        )
+        .unwrap();
+        let entry = McpEntry::new("agent-browser".into());
+        install_json_server(path.clone(), "mcpServers", entry.claude_server_json()).unwrap();
+
+        assert!(remove_json_server(&path, "mcpServers", "env")
+            .unwrap()
+            .is_some());
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(parsed["mcpServers"]["other"].is_object());
+        assert!(parsed["mcpServers"].get(MCP_SERVER_NAME).is_none());
+
+        // A user-added entry without Jean's restore key is kept.
+        fs::write(
+            &path,
+            r#"{ "mcpServers": { "agent-browser": { "command": "agent-browser" } } }"#,
+        )
+        .unwrap();
+        assert!(remove_json_server(&path, "mcpServers", "env")
+            .unwrap()
+            .is_none());
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(parsed["mcpServers"][MCP_SERVER_NAME].is_object());
+    }
+
+    #[test]
+    fn remove_toml_server_removes_only_jean_entry() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "[mcp_servers.existing]\ncommand = \"foo\"\n").unwrap();
+        let entry = McpEntry::new("/usr/bin/agent-browser".into());
+        install_toml_server(path.clone(), &entry, "Codex", false).unwrap();
+
+        assert!(remove_toml_server(&path).unwrap().is_some());
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("[mcp_servers.existing]"));
+        assert!(!content.contains("agent-browser"));
+        assert!(codex_session_config_override_at(&path, "s").is_none());
+
+        fs::write(&path, "[mcp_servers.agent-browser]\ncommand = \"x\"\n").unwrap();
+        assert!(remove_toml_server(&path).unwrap().is_none());
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("[mcp_servers.agent-browser]"));
     }
 
     #[test]

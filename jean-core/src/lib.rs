@@ -427,6 +427,8 @@ pub struct AppPreferences {
     pub jean_mcp_max_depth: u32, // Max recursive spawn depth via Jean MCP (default 3)
     #[serde(default = "default_jean_mcp_rate_limit")]
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
+    #[serde(default)]
+    pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default false)
 }
 
 fn default_finished_session_animation_enabled() -> bool {
@@ -906,6 +908,25 @@ mod tests {
         assert_eq!(value["linear_api_key_configured"], json!(true));
         assert!(value.get("http_server_token").is_none());
         assert_eq!(value["http_server_token_configured"], json!(true));
+    }
+
+    #[test]
+    fn agent_browser_prompt_lines_follow_preference() {
+        let prompt = default_global_system_prompt();
+        let mut prefs = AppPreferences::default();
+
+        let off = crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs));
+        assert!(!off.to_ascii_lowercase().contains("agent browser"));
+        assert!(off.contains("Verify UI changes in the running app instead."));
+        assert!(
+            !crate::apply_agent_browser_preference(prompt.clone(), None).contains("Agent Browser")
+        );
+
+        prefs.agent_browser_enabled = true;
+        assert_eq!(
+            crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs)),
+            prompt
+        );
     }
 
     #[test]
@@ -2115,6 +2136,25 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
         .to_string()
 }
 
+/// Drop Agent Browser instructions from a system prompt when the integration
+/// is off, so agents are not told to use a browser tool that is not there.
+pub(crate) fn apply_agent_browser_preference(
+    prompt: String,
+    preferences: Option<&AppPreferences>,
+) -> String {
+    if preferences.is_some_and(|prefs| prefs.agent_browser_enabled) {
+        return prompt;
+    }
+    prompt
+        .lines()
+        .filter(|line| {
+            let line = line.to_ascii_lowercase();
+            !line.contains("agent browser") && !line.contains("agent-browser")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn default_global_system_prompt() -> String {
     r#"Always use ASD-STE100 Simplified Technical English when you talk to me.
 
@@ -2815,6 +2855,7 @@ impl Default for AppPreferences {
             jean_mcp_enabled: default_jean_mcp_enabled(),
             jean_mcp_max_depth: default_jean_mcp_max_depth(),
             jean_mcp_rate_limit_per_minute: default_jean_mcp_rate_limit(),
+            agent_browser_enabled: false,
         }
     }
 }
@@ -4764,13 +4805,33 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
         repair_managed_cli_links(&link_context, &link_preferences);
     });
 
-    // Required integrations are repaired on every launch. Do this outside the
-    // startup path because agent-browser can download Chromium on first use.
+    // Integrations are repaired on every launch. Do this outside the startup
+    // path because agent-browser can download Chromium on first use.
+    let agent_browser_enabled = preferences.agent_browser_enabled;
     async_runtime::spawn(async move {
         if let Err(error) =
             jean_mcp_config::install_jean_mcp_config_impl(context.clone(), None, None).await
         {
             log::warn!("Failed to activate required Jean MCP configs: {error}");
+        }
+
+        // Agent Browser is opt-in. When it is off, remove the MCP entries that
+        // Jean wrote, so CLIs do not start it.
+        if !agent_browser_enabled {
+            match async_runtime::spawn_blocking(agent_browser::remove_agent_browser_mcp_sync).await
+            {
+                Ok(results) => {
+                    for result in results.into_iter().filter(|r| r.status == "error") {
+                        log::warn!(
+                            "Failed to remove agent-browser MCP for {}: {}",
+                            result.backend,
+                            result.message
+                        );
+                    }
+                }
+                Err(error) => log::warn!("agent-browser MCP removal task failed: {error}"),
+            }
+            return;
         }
 
         let status = agent_browser::resolve_agent_browser_binary(&context);
@@ -4781,13 +4842,13 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
             })
             .await
             {
-                Ok(Ok(_)) => log::info!("Installed required agent-browser integration"),
+                Ok(Ok(_)) => log::info!("Installed agent-browser integration"),
                 Ok(Err(error)) => {
-                    log::warn!("Failed to install required agent-browser: {error}");
+                    log::warn!("Failed to install agent-browser: {error}");
                     return;
                 }
                 Err(error) => {
-                    log::warn!("Required agent-browser install task failed: {error}");
+                    log::warn!("agent-browser install task failed: {error}");
                     return;
                 }
             }
@@ -4800,13 +4861,13 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
                     .filter(|result| result.status == "error")
                 {
                     log::warn!(
-                        "Failed to activate required agent-browser for {}: {}",
+                        "Failed to activate agent-browser for {}: {}",
                         result.backend,
                         result.message
                     );
                 }
             }
-            Err(error) => log::warn!("Failed to activate required agent-browser MCP: {error}"),
+            Err(error) => log::warn!("Failed to activate agent-browser MCP: {error}"),
         }
 
         match async_runtime::spawn_blocking(move || agent_browser::import_legacy_profile(&context))

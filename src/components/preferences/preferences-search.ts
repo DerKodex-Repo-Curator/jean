@@ -726,6 +726,8 @@ const sectionEntries: PreferenceSearchEntry[] = [
       'playwright',
       'chromium',
       'vercel agent-browser',
+      'enable agent browser',
+      'disable agent browser',
       'computer use',
       'login profile',
     ],
