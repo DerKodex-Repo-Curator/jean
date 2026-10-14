@@ -4498,8 +4498,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </InlineField>
 
               <InlineField
-                label="Close original session on clear context"
-                description="Automatically close the original session when using Clear context with Full access"
+                label="Archive original session on clear context"
+                description="Archive the original planning session when a plan is approved with Clear context or in a new worktree. You can restore it from archived sessions."
               >
                 <Switch
                   checked={preferences?.close_original_on_clear_context ?? true}

@@ -8,8 +8,14 @@ vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
 }))
 
+import { QueryClient } from '@tanstack/react-query'
 import { useChatStore } from '@/store/chat-store'
-import { clearPlanApprovalTransientState } from './plan-approval-state'
+import { chatQueryKeys } from '@/services/chat'
+import type { WorktreeSessions } from '@/types/chat'
+import {
+  archiveOriginalPlanSession,
+  clearPlanApprovalTransientState,
+} from './plan-approval-state'
 
 describe('clearPlanApprovalTransientState', () => {
   beforeEach(() => {
@@ -46,5 +52,65 @@ describe('clearPlanApprovalTransientState', () => {
     expect(next.waitingForInputSessionIds[sessionId]).toBeUndefined()
     expect(next.pendingPlanMessageIds[sessionId]).toBeUndefined()
     expect(next.getPendingPlanMessageId(sessionId)).toBeNull()
+  })
+})
+
+describe('archiveOriginalPlanSession', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function seedSessions(queryClient: QueryClient) {
+    queryClient.setQueryData<WorktreeSessions>(chatQueryKeys.sessions('wt'), {
+      worktree_id: 'wt',
+      sessions: [{ id: 'plan' }, { id: 'exec' }],
+      active_session_id: 'plan',
+    } as unknown as WorktreeSessions)
+  }
+
+  it('archives (never deletes) the planning session so history survives (#795)', async () => {
+    const queryClient = new QueryClient()
+    seedSessions(queryClient)
+
+    archiveOriginalPlanSession({
+      queryClient,
+      worktreeId: 'wt',
+      worktreePath: '/tmp/wt',
+      sessionId: 'plan',
+      replacementSessionId: 'exec',
+    })
+
+    expect(mockInvoke).toHaveBeenCalledWith('archive_session', {
+      worktreeId: 'wt',
+      worktreePath: '/tmp/wt',
+      sessionId: 'plan',
+    })
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      'close_session',
+      expect.anything()
+    )
+    const data = queryClient.getQueryData<WorktreeSessions>(
+      chatQueryKeys.sessions('wt')
+    )
+    expect(data?.sessions.map(s => s.id)).toEqual(['exec'])
+    expect(data?.active_session_id).toBe('exec')
+  })
+
+  it('keeps the active session when no replacement is in the same worktree', () => {
+    const queryClient = new QueryClient()
+    seedSessions(queryClient)
+
+    archiveOriginalPlanSession({
+      queryClient,
+      worktreeId: 'wt',
+      worktreePath: '/tmp/wt',
+      sessionId: 'plan',
+    })
+
+    const data = queryClient.getQueryData<WorktreeSessions>(
+      chatQueryKeys.sessions('wt')
+    )
+    expect(data?.sessions.map(s => s.id)).toEqual(['exec'])
+    expect(data?.active_session_id).toBe('plan')
   })
 })
